@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
 import { domParser, xmlSerializer, WebSocket } from "./shims";
-
+import { TimeoutError } from "./errors";
 import {
   generateSecureNonce,
   scramParseChallenge,
@@ -51,10 +51,10 @@ interface SocketEventMap {
   authenticated: void;
   "stream:start": void;
   "stream:end": void;
-  stanza: { name: string; attrs: Record<string, string>; children: any[] };
+  // stanza: { name: string; attrs: Record<string, string>; children: any[] };
   "net:message": string;
   "session:start": void;
-  [event: string | symbol]: any;
+  [event: string | symbol]: unknown;
 }
 
 // 扩展 EventEmitter 类型定义
@@ -68,6 +68,11 @@ export interface WebSocketClient extends EventEmitter {
     event: E,
     arg?: SocketEventMap[E]
   ): boolean;
+
+  off<E extends keyof SocketEventMap>(
+    event: E,
+    listener: (arg: SocketEventMap[E]) => void
+  ): this;
 
   // // 泛型事件处理
   // on(event: string | symbol, listener: (...args: any[]) => void): this;
@@ -87,6 +92,7 @@ export class WebSocketClient extends EventEmitter {
     this.resource = jid.resource ?? Math.random().toString(32).slice(2, 8);
     this.password = password;
   }
+
   connect(url: string) {
     this.url = url;
     this.ws = new WebSocket(url, "xmpp");
@@ -136,22 +142,30 @@ export class WebSocketClient extends EventEmitter {
     //   throw new Error("没有to");
     // }
     return new Promise<Element>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.removeResponseListener(
-          { id: xml.getAttribute("id") as string },
-          handle
-        );
-        reject(new Error("请求超时"));
-      }, timeout);
+      const id = xml.getAttribute("id");
 
-      const handle = (response: Element) => {
-        clearTimeout(timer);
-        resolve(response);
+      const onResponse = (response: string) => {
+        const resElement = domParser.parseFromString(
+          response,
+          "text/xml"
+        ).documentElement;
+        const responseId = resElement.getAttribute("id");
+        if (responseId && responseId === id) {
+          // 收到匹配的响应，解除监听并解析 Promise
+          this.off("net:message", onResponse);
+          clearTimeout(timer);
+          resolve(resElement);
+        }
       };
 
-      this.responseListener({ id: xml.getAttribute("id") as string }, handle, {
-        once: true,
-      });
+      // 监听全局事件
+      this.on("net:message", onResponse);
+
+      // 处理超时
+      const timer = setTimeout(() => {
+        this.off("net:message", onResponse);
+        reject(new TimeoutError(`请求超时: ${id}`));
+      }, timeout);
 
       this.send(xml);
     });
@@ -183,6 +197,7 @@ export class WebSocketClient extends EventEmitter {
       this.emit("net:message", ev.data);
     }
   }
+
   onError(ev: Event) {
     console.error("error", ev);
   }
@@ -306,63 +321,66 @@ export class WebSocketClient extends EventEmitter {
     }
   }
 
-  /**
-   * 添加响应监听器
-   * @param filter 过滤条件，包括 `id` 和 `tagName`
-   * @param callback 响应回调函数，当接收到符合条件的响应时调用
-   * @param option 可选对象，包含 `once` 属性，表示是否只触发一次
-   */
-  private responseListener(
-    filter: { id?: string; tagName?: "message" | "iq" | "presence" },
-    callback: (response: Element) => void,
-    option: { once: boolean } = { once: false }
-  ) {
-    // 用于监听响应，返回相应的响应
-    // 使用 EventEmitter 触发事件
-    const eventName = `xmpp:${filter.id ?? "*"}:${filter.tagName ?? "*"}`;
-    const handler = (ev: MessageEvent) => {
-      try {
-        const response = domParser.parseFromString(ev.data, "text/xml").documentElement;
-        const resId = response.getAttribute("id");
-        const resTagName = response.tagName;
+  // /**
+  //  * 添加响应监听器
+  //  * @param filter 过滤条件，包括 `id` 和 `tagName`
+  //  * @param callback 响应回调函数，当接收到符合条件的响应时调用
+  //  * @param option 可选对象，包含 `once` 属性，表示是否只触发一次
+  //  */
+  // private responseListener(
+  //   filter: { id?: string; tagName?: "message" | "iq" | "presence" },
+  //   callback: (response: Element) => void,
+  //   option: { once: boolean } = { once: false }
+  // ) {
+  //   // 用于监听响应，返回相应的响应
+  //   // 使用 EventEmitter 触发事件
+  //   const eventName = `xmpp:${filter.id ?? "*"}:${filter.tagName ?? "*"}`;
+  //   const handler = (ev: MessageEvent) => {
+  //     try {
+  //       const response = domParser.parseFromString(
+  //         ev.data,
+  //         "text/xml"
+  //       ).documentElement;
+  //       const resId = response.getAttribute("id");
+  //       const resTagName = response.tagName;
 
-        const idMatch = filter.id ? resId === filter.id : true;
-        const tagMatch = filter.tagName ? resTagName === filter.tagName : true;
+  //       const idMatch = filter.id ? resId === filter.id : true;
+  //       const tagMatch = filter.tagName ? resTagName === filter.tagName : true;
 
-        if (idMatch && tagMatch) {
-          // 发出事件
-          this.emit(eventName, response);
-        }
-      } catch (error) {
-        console.error("解析 XML 失败");
-        this.ws!.removeEventListener("message", handler);
-      }
-    };
-    // 添加WS事件监听器
-    this.ws!.addEventListener("message", handler);
-    // 添加EventEmitter监听器
-    if (option.once) {
-      this.once(eventName, callback);
-    } else {
-      this.on(eventName, callback);
-    }
-  }
+  //       if (idMatch && tagMatch) {
+  //         // 发出事件
+  //         this.emit(eventName, response);
+  //       }
+  //     } catch (error) {
+  //       console.error("解析 XML 失败");
+  //       this.ws!.removeEventListener("message", handler);
+  //     }
+  //   };
+  //   // 添加WS事件监听器
+  //   this.ws!.addEventListener("message", handler);
+  //   // 添加EventEmitter监听器
+  //   if (option.once) {
+  //     this.once(eventName, callback);
+  //   } else {
+  //     this.on(eventName, callback);
+  //   }
+  // }
 
-  /**
-   * 移除响应监听器
-   * @param filter 过滤条件，包括 `id` 和 `tagName`
-   * @param callback 响应回调函数，当接收到符合条件的响应时调用
-   */
-  private removeResponseListener(
-    filter: { id?: string; tagName?: "message" | "iq" | "presence" },
-    callback: (response: Element) => void
-  ) {
-    // 构造事件名称，与 responseListener 中的格式保持一致
-    const eventName = `xmpp:${filter.id ?? "*"}:${filter.tagName ?? "*"}`;
+  // /**
+  //  * 移除响应监听器
+  //  * @param filter 过滤条件，包括 `id` 和 `tagName`
+  //  * @param callback 响应回调函数，当接收到符合条件的响应时调用
+  //  */
+  // private removeResponseListener(
+  //   filter: { id?: string; tagName?: "message" | "iq" | "presence" },
+  //   callback: (response: Element) => void
+  // ) {
+  //   // 构造事件名称，与 responseListener 中的格式保持一致
+  //   const eventName = `xmpp:${filter.id ?? "*"}:${filter.tagName ?? "*"}`;
 
-    // 移除 EventEmitter 监听器
-    this.off(eventName, callback);
-  }
+  //   // 移除 EventEmitter 监听器
+  //   this.off(eventName, callback);
+  // }
 
   /** 关闭ws连接 */
   private close() {

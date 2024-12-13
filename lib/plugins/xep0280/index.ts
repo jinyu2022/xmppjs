@@ -4,7 +4,7 @@ import { Carbons } from "./carbons";
 export class XEP0280 extends Carbons implements Plugin {
   readonly name = "XEP0280";
   readonly dependencies = ["XEP0030"] as const;
-  connection: Connection;
+  readonly connection: Connection;
   constructor(connection: Connection) {
     super(connection);
     // 检查依赖
@@ -42,6 +42,34 @@ export class XEP0280 extends Carbons implements Plugin {
           }
         });
     });
+
+    this.connection.registerStanzaPlugin('message',(message) => {
+      const carbon = message.xml.getElementsByTagNameNS(this.NS, 'received ')[0];
+      if (carbon) {
+        message.carbon = {
+          type: 'received',
+          forward: message.xml.getElementsByTagName('forwarded')[0],
+        };
+        return true;
+      }
+      return false;
+    })
+    this.connection.registerEventPlugin('carbon_received', {
+      tagName: 'message',
+      matcher:(message) => {
+        return !!(message?.carbon && message.carbon.type === 'received');
+      },
+    })
+  }
+}
+
+declare module "../../stanza" {
+  interface Message {
+    /** 由插件XEP0280添加 */
+    carbon?: {
+      type: 'received'| 'sent';
+      forward: Element;
+    }
   }
 }
 

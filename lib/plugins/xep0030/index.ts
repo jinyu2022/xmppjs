@@ -11,7 +11,9 @@ export class XEP0030 extends Disco implements Plugin {
     this.addFeature(this.NS.DISCO_INFO);
     this.addFeature(this.NS.DISCO_ITEMS);
 
-    this.connection.on("iq", (stanza) => {
+    this.connection.on("iq", (iq) => {
+      // TODO: 不应该操作xml，应该操作对象
+      const stanza = iq.xml;
       // 如果节是向客户端询问disco信息，则回复
       // 获取命名空间
       const query = stanza.getElementsByTagName("query")[0];
