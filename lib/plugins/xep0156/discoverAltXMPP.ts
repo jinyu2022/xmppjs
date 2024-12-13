@@ -20,7 +20,7 @@ export const discoverAltXMPP = (domain: string) => {
                 'urn:xmpp:alt-connections:xbosh': 'xbosh'
             } as const;
             // 使用 for-of 循环替代传统 for 循环
-            for (const element of Array.from(elements)) {
+            for (const element of elements) {
                 const rel = element.getAttribute('rel');
                 const href = element.getAttribute('href');
                 if (rel && href) {

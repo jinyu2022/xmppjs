@@ -2,21 +2,54 @@ import { JID } from "./JID";
 import WebSocketClient from "./websocket";
 import type { Protocol, Options } from "./types";
 import { implementation } from "./shims";
+import { XMPPError, TimeoutError } from "./errors";
+import { Message, Iq, Presence, StanzaBase } from "./stanza";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
 
+interface StanzaHandlerMap {
+  message: (message: Message) => void;
+  iq: (iq: Iq) => void;
+  presence: (presence: Presence) => void;
+  others: (other: StanzaBase) => void;
+}
+
+type StanzaPlugins = {
+  [K in keyof StanzaHandlerMap]: StanzaHandlerMap[K][];
+};
+
+interface EventHandlerMap {
+  message: (message: Message) => boolean;
+  iq: (iq: Iq) => boolean;
+  presence: (presence: Presence) => boolean;
+  others: (other: StanzaBase) => boolean;
+};
+// 事件插件映射类型
+interface EventPluginMap<K extends keyof EventHandlerMap> {
+  eventName: string;
+  matcher: EventHandlerMap[K];
+}
+interface StanzaInstanceMap {
+  message: Message;
+  iq: Iq;
+  presence: Presence;
+  others: StanzaBase;
+}
 // 定义所有可能的事件参数类型
 interface SocketEventMap {
-  message: Element;
-  iq: Element;
-  presence: Element;
+  stanza: Element;
+  message: Message;
+  iq: Iq;
+  presence: Presence;
+  others: StanzaBase;
   "session:start": void;
+  [key: string | symbol]: unknown;
 }
 // 扩展 EventEmitter 类型定义
 export interface Connection extends EventEmitter {
   on<E extends keyof SocketEventMap>(
     event: E,
-    listener: (arg: SocketEventMap[E]) => void
+    listener: (arg: SocketEventMap[E]) => void 
   ): this;
 
   emit<E extends keyof SocketEventMap>(
@@ -28,9 +61,8 @@ export interface Connection extends EventEmitter {
 //   [K in keyof PluginRegistry]: InstanceType<(typeof plugins)[K]>;
 // };
 // 2. 声明合并
-declare module "./connection" {
-  interface Connection extends PluginRegistry {}
-}
+export interface Connection extends PluginRegistry {}
+
 export class Connection extends EventEmitter {
   jid: JID;
   password: string;
@@ -48,9 +80,24 @@ export class Connection extends EventEmitter {
   tls = true;
   /* 当前的连接 */
   socket: WebSocketClient | null = null;
-  /** 当前连接的服务器的功能 */
   // private features: Set<string> = new Set();
   // 插件
+  private readonly stanzaPlugins: StanzaPlugins = {
+    message: [],
+    iq: [],
+    presence: [],
+    others: [],
+  } as const;
+
+  private readonly eventPlugins:{
+    [K in keyof EventHandlerMap]: EventPluginMap<K>[];
+  }  = {
+    message: [],
+    iq: [],
+    presence: [],
+    others: [],
+  } as const;
+
   // [plugin: keyof typeof plugins]: Plugin | undefined;
   [name: string]: any;
 
@@ -105,7 +152,7 @@ export class Connection extends EventEmitter {
    */
   registerPlugin<T extends keyof typeof plugins>(
     name: T
-  ): ReturnType<InstanceType<(typeof plugins)[T]>["init"]>;
+  ): void;
   /**
    * 注册插件，如果是本库实现的插件，命名都是XEP0000格式，直接传入名称即可
    * 如果是自定义插件，需要传入插件构造函数
@@ -123,7 +170,25 @@ export class Connection extends EventEmitter {
     } else {
       throw new Error(`未找到插件 ${name}`);
     }
-    return this[name].init();
+    this[name].init();
+  }
+
+  registerStanzaPlugin<K extends keyof StanzaHandlerMap>(
+    tagName: K,
+    handler: StanzaHandlerMap[K]
+  ) {
+    this.stanzaPlugins[tagName].push(handler);
+  }
+
+  registerEventPlugin<K extends keyof EventHandlerMap>(
+    eventName: string,
+    option: {
+      tagName: K;
+      matcher:  EventHandlerMap[K];
+    }
+  ) {
+    const { tagName, matcher } = option;
+    this.eventPlugins[tagName].push({eventName, matcher});
   }
 
   connect() {
@@ -181,20 +246,51 @@ export class Connection extends EventEmitter {
       "text/xml"
     ).documentElement;
 
-    // 解决愚蠢的类型检查
-    if (stanza === null) throw new Error("stanza为空");
+    this.emit("stanza", stanza);
 
-    if (stanza.tagName === "message") {
-      this.emit("message", stanza);
-    } else if (stanza.tagName === "iq") {
-      this.emit("iq", stanza);
-    } else if (stanza.tagName === "presence") {
-      this.emit("presence", stanza);
-    } else {
-      console.log("其他stanza", stanza);
-    }
+    const tagName = ["message", "iq", "presence"].includes(stanza.tagName)
+      ? stanza.tagName as keyof StanzaHandlerMap
+      : "others";
+    const stanzaInstance = this.stanzaInstanceFactory(stanza);
+    this.emit(tagName, stanzaInstance);
   }
 
+  private stanzaInstanceFactory(stanza: Element) {
+    const tagName = ["message", "iq", "presence"].includes(stanza.tagName)
+      ? (stanza.tagName as keyof StanzaHandlerMap)
+      : "others";
+
+    let stanzaInstance;
+
+    if (tagName === "message") {
+      stanzaInstance = new Message(stanza, this);
+      for (const handler of this.stanzaPlugins[tagName]) {
+        handler(stanzaInstance);
+      }
+      for (const eventPlugin of this.eventPlugins[tagName]) {
+        if (eventPlugin.matcher(stanzaInstance)) {
+          this.emit(eventPlugin.eventName, stanzaInstance);
+        }
+      }
+    } else if (tagName === "iq") {
+      stanzaInstance = new Iq(stanza, this);
+      for (const handler of this.stanzaPlugins[tagName]) {
+        handler(stanzaInstance);
+      }
+    } else if (tagName === "presence") {
+      stanzaInstance = new Presence(stanza, this);
+      for (const handler of this.stanzaPlugins[tagName]) {
+        handler(stanzaInstance);
+      }
+    } else {
+      stanzaInstance = new StanzaBase(stanza, this);
+      for (const handler of this.stanzaPlugins[tagName]) {
+        handler(stanzaInstance);
+      }
+    }
+
+    return stanzaInstance;
+  }
   send(stanza: Element) {
     // 检查必须的流属性
     // XXX: 我不清楚需要进行那些检查,多余, 或者缺失
@@ -202,15 +298,15 @@ export class Connection extends EventEmitter {
     // 一个拥有特定接收者的节必须拥有一个'to'属性
     // 一个从客户端发送到服务器的由该服务器直接处理的节(例如, presence状态信息)不能拥有'to'属性
     if (stanza.tagName === "message" && !stanza.getAttribute("to")) {
-      throw new Error("message stanza缺少to属性");
+      throw new XMPPError(stanza, "message stanza缺少to属性");
     }
     if (stanza.tagName === "iq" && !stanza.getAttribute("type")) {
-      throw new Error("iq stanza缺少type属性");
+      throw new XMPPError(stanza, "iq stanza缺少type属性");
     }
-    // 如果没有, 服务器会自动填充, 但是我们应该尽量避免这种情况
-    if (!stanza.getAttribute("from")) {
-      stanza.setAttribute("from", this.jid.full);
-    }
+    // 如果没有, 服务器会自动填充
+    // if (!stanza.getAttribute("from")) {
+    //   stanza.setAttribute("from", this.jid.full);
+    // }
     if (!stanza.getAttribute("id")) {
       stanza.setAttribute("id", uuidv4());
     }
@@ -227,9 +323,10 @@ export class Connection extends EventEmitter {
   /**
    * 发送一个stanza，返回一个Promise对象
    * @param stanza 要发送的stanza
+   * @param timeout 超时时间，默认30秒
    * @returns 一个Promise对象，仅在发送失败时reject
    */
-  sendAsync(stanza: Element) {
+  sendAsync(stanza: Element, timeout = 30000) {
     // 检查必须的流属性
     // XXX: 我不清楚需要进行那些检查,多余, 或者缺失
 
@@ -257,7 +354,36 @@ export class Connection extends EventEmitter {
     }
     if (!this.socket) throw new Error("未连接");
 
-    return this.socket.sendAsync(stanza);
+    return this.socket.sendAsync(stanza, timeout);
+  }
+
+  /**
+   * 创建一个presence节
+   * @param to 接收者
+   * @param type 类型
+   *   - subscribe 订阅
+   *   - unsubscribe 取消订阅
+   *   - unavailable 下线
+   *   - subscribed 订阅成功
+   *   - unsubscribed 取消订阅成功
+   */
+  createPres(
+    to: string | JID,
+    type?:
+      | "subscribe"
+      | "unsubscribe"
+      | "unavailable"
+      | "subscribed"
+      | "unsubscribed"
+  ) {
+    const pre = implementation.createDocument(
+      "jabber:client",
+      "presence",
+      null
+    );
+    pre.documentElement.setAttribute("to", to.toString());
+    if (type) pre.documentElement.setAttribute("type", type);
+    return pre;
   }
 
   createIq(
@@ -290,6 +416,64 @@ export class Connection extends EventEmitter {
     }
 
     return this.sendAsync(iq);
+  }
+
+  /**
+   * 一次性消息节监听处理器
+   * @param id 消息id
+   * @param callback 回调函数
+   * @param option 选项
+   */
+  private stanzaListener(
+    id: string,
+    callback: (stanza: Element) => void,
+    timeout?: number
+  ): void;
+
+  /**
+   * 一次性消息节监听处理器
+   * @param filter 过滤器函数
+   * @param callback 回调函数
+   */
+  private stanzaListener(
+    filter: (stanza: Element) => boolean,
+    callback: (stanza: Element) => void,
+    timeout?: number
+  ): void;
+
+  private stanzaListener(
+    filter: string | ((stanza: Element) => boolean),
+    callback: (stanza: Element) => void,
+    timeout = 30000
+  ) {
+    // 定义处理函数
+    const handler = (stanza: Element) => {
+      const isMatch =
+        typeof filter === "string"
+          ? stanza.getAttribute("id") === filter
+          : filter(stanza);
+
+      if (isMatch) {
+        callback(stanza);
+        this.off("stanza", handler);
+        clearTimeout(timerID);
+      }
+    };
+    const timerID = setTimeout(() => {
+      this.off("stanza", handler);
+      return new TimeoutError("stanza监听超时");
+    }, timeout);
+    // 注册监听器
+    this.on("stanza", handler);
+  }
+
+  /**
+   * 消息节监听移除器
+   * @param callback 回调函数
+   *
+   */
+  removeStanzaListener(callback: (stanza: Element) => void) {
+    this.off("stanza", callback);
   }
 }
 
