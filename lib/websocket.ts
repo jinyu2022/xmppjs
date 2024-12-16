@@ -135,6 +135,7 @@ export class WebSocketClient extends EventEmitter {
    */
   sendAsync(xml: Element, timeout = 30000) {
     // 检查xml是否合法
+    console.log("id", xml.getAttribute("id"));
     if (!xml.getAttribute("id")) {
       throw new Error("没有id");
     }
@@ -187,11 +188,14 @@ export class WebSocketClient extends EventEmitter {
     this.emit("disconnect", ev);
     console.log("ws连接close", ev.code, ev.reason);
   }
+
   onMessage(ev: MessageEvent) {
-    console.log("message", ev.data);
+    // console.log("message", ev.data);
     if (this.status < Status.SESSIONSTART) {
       // 如果还没有开始会话，就准备会话
       this.prepareSession(ev.data);
+      
+      this.emit("net:message", ev.data);
     } else {
       // 如果已经开始会话，就直接触发事件
       this.emit("net:message", ev.data);
@@ -315,6 +319,8 @@ export class WebSocketClient extends EventEmitter {
             this.emit("session:start");
             this.status = Status.SESSIONSTART;
             // 发送在线状态，开始接受消息
+          }else{
+            console.error("绑定失败", jid);
           }
         });
       }

@@ -1,12 +1,14 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
+import { resolve } from 'path';
 // import { defineConfig } from 'vitest/config';
 export default defineConfig({
   define: {
-    globalUtils: {
-      DOMParser: '(typeof window !== "undefined" ? window.DOMParser : require("xmldom").DOMParser)',
-      // WebSocket: '(typeof window !== "undefined" ? window.WebSocket : require("ws"))',
-    }
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'lib'),
+      },
+    },
   },
   build: {
     lib: {

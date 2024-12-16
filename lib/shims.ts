@@ -1,3 +1,6 @@
+// @ts-nocheck
+import type xmldom from '@xmldom/xmldom';
+
 function getDOMParser()  {
     if (typeof window !== 'undefined' && window.DOMParser) {
         return new DOMParser();
@@ -48,10 +51,10 @@ function getWebSocket() {
 
 // XXX:
 /** 你必须同时兼容web和node的类型 */
-export const domParser: DOMParser = getDOMParser();
+export const domParser: xmldom.DOMParser = getDOMParser();
 /** 你必须同时兼容web和node的类型 */
-export const implementation: typeof document.implementation = getImplementation();
+export const implementation: xmldom.DOMImplementation = getImplementation();
 /** 你必须同时兼容web和node的类型 */
-export const xmlSerializer: XMLSerializer = getXmlSerializer();
+export const xmlSerializer: xmldom.XMLSerializer = getXmlSerializer();
 /** 你必须同时兼容web和node的类型 */
 export const WebSocket: typeof window.WebSocket = getWebSocket();

@@ -1,7 +1,7 @@
 import { JID } from "./JID";
 import WebSocketClient from "./websocket";
 import type { Protocol, Options } from "./types";
-import { implementation } from "./shims";
+import { domParser ,implementation } from "./shims";
 import { XMPPError, TimeoutError } from "./errors";
 import { Message, Iq, Presence, StanzaBase } from "./stanza";
 import { EventEmitter } from "events";
@@ -26,7 +26,7 @@ interface EventHandlerMap {
 };
 // 事件插件映射类型
 interface EventPluginMap<K extends keyof EventHandlerMap> {
-  eventName: string;
+  eventName: keyof SocketEventMap;
   matcher: EventHandlerMap[K];
 }
 interface StanzaInstanceMap {
@@ -36,14 +36,14 @@ interface StanzaInstanceMap {
   others: StanzaBase;
 }
 // 定义所有可能的事件参数类型
-interface SocketEventMap {
+export interface SocketEventMap {
   stanza: Element;
   message: Message;
   iq: Iq;
   presence: Presence;
   others: StanzaBase;
   "session:start": void;
-  [key: string | symbol]: unknown;
+  // [key: string | symbol]: unknown;
 }
 // 扩展 EventEmitter 类型定义
 export interface Connection extends EventEmitter {
@@ -173,6 +173,11 @@ export class Connection extends EventEmitter {
     this[name].init();
   }
 
+  /**
+   * 注册stanza处理插件
+   * @param tagName 根元素名称，可选值有message, iq, presence, others
+   * @param handler 处理函数
+   */
   registerStanzaPlugin<K extends keyof StanzaHandlerMap>(
     tagName: K,
     handler: StanzaHandlerMap[K]
@@ -180,8 +185,16 @@ export class Connection extends EventEmitter {
     this.stanzaPlugins[tagName].push(handler);
   }
 
+  /**
+   * 注册事件插件
+   * @template K "message" | "iq" | "presence" | "others"
+   * @param eventName 事件名称
+   * @param option 选项
+   * @param option.tagName 标签名
+   * @param option.matcher 匹配器，返回true则触发事件
+   */
   registerEventPlugin<K extends keyof EventHandlerMap>(
-    eventName: string,
+    eventName: keyof SocketEventMap,
     option: {
       tagName: K;
       matcher:  EventHandlerMap[K];
@@ -211,7 +224,7 @@ export class Connection extends EventEmitter {
         console.log("连接已关闭");
         this.socket = null;
       });
-      this.socket!.on("net:message", this.onMessage);
+      this.socket!.on("net:message", (message) => this.onMessage(message));
       // 协商流特性
       this.socket!.on("session:start", () => {
         this.socket?.send(
@@ -240,11 +253,11 @@ export class Connection extends EventEmitter {
   }
 
   onMessage(message: string) {
-    console.log(message);
-    const stanza = new DOMParser().parseFromString(
+    console.log("receive", message);
+    const stanza = domParser.parseFromString(
       message,
       "text/xml"
-    ).documentElement;
+    ).documentElement!;
 
     this.emit("stanza", stanza);
 
@@ -291,6 +304,7 @@ export class Connection extends EventEmitter {
 
     return stanzaInstance;
   }
+
   send(stanza: Element) {
     // 检查必须的流属性
     // XXX: 我不清楚需要进行那些检查,多余, 或者缺失
@@ -381,8 +395,8 @@ export class Connection extends EventEmitter {
       "presence",
       null
     );
-    pre.documentElement.setAttribute("to", to.toString());
-    if (type) pre.documentElement.setAttribute("type", type);
+    pre.documentElement!.setAttribute("to", to.toString());
+    if (type) pre.documentElement!.setAttribute("type", type);
     return pre;
   }
 
@@ -392,7 +406,7 @@ export class Connection extends EventEmitter {
     queryNS?: string
   ) {
     const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement;
+    const iq = doc.documentElement!;
     iq.setAttribute("type", type);
     if (to) iq.setAttribute("to", to.toString());
     if (queryNS) {
@@ -407,7 +421,7 @@ export class Connection extends EventEmitter {
     queryNS?: string
   ) {
     const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement;
+    const iq = doc.documentElement!;
     iq.setAttribute("type", type);
     iq.setAttribute("to", to.toString());
     if (queryNS) {

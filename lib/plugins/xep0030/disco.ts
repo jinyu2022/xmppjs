@@ -197,7 +197,7 @@ export class Disco {
         null,
         "identity",
         null
-      ).documentElement;
+      ).documentElement!;
       identityElement.setAttribute("category", identity.category);
       identityElement.setAttribute("type", identity.type);
       identityElement.setAttribute("name", identity.name);
@@ -209,7 +209,7 @@ export class Disco {
         null,
         "feature",
         null
-      ).documentElement;
+      ).documentElement!;
       featureElement.setAttribute("var", feature);
       query.appendChild(featureElement);
     }
@@ -238,7 +238,7 @@ export class Disco {
         null,
         "item",
         null
-      ).documentElement;
+      ).documentElement!;
       itemElement.setAttribute("jid", item.jid);
       if (item.name) {
         itemElement.setAttribute("name", item.name);

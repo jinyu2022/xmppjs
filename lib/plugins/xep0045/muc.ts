@@ -1,10 +1,10 @@
 import { v4 as uuidv4 } from "uuid";
-import type { Connection } from "../../connection";
 import type { Presence } from "../../stanza";
 import { JID } from "../../JID";
 import { implementation } from "../../shims";
 import { XMPPError, TimeoutError } from "../../errors";
-interface JoinOptions {
+import { Form, DataForm } from "../xep0004/form";
+export interface JoinOptions {
   maxchars?: number;
   maxstanzas?: number;
   seconds?: number;
@@ -12,14 +12,14 @@ interface JoinOptions {
   password?: string;
 }
 
-interface MUCItem {
+export interface MUCItem {
   role: "none" | "visitor" | "participant" | "moderator";
   affiliation: "none" | "outcast" | "member" | "admin" | "owner";
   show: "away" | "chat" | "dnd" | "xa";
   status?: string;
   nick?: string;
 }
-enum MUCStatusCode {
+export enum MUCStatusCode {
   /** 100 - 用户的完整 JID 对所有成员可见 */
   FullJIDVisible = "100",
   /** 101 - 用户成员身份变更 (不在房间时) */
@@ -60,29 +60,26 @@ enum MUCStatusCode {
   SystemShutdownRemoved = "332",
 }
 export class MUC {
-  readonly NS = {
+  static readonly NS = {
     BASE: "http://jabber.org/protocol/muc",
     USER: "http://jabber.org/protocol/muc#user",
     ADMIN: "http://jabber.org/protocol/muc#admin",
     OWNER: "http://jabber.org/protocol/muc#owner",
   } as const;
 
-  readonly ROLE = ["none", "visitor", "participant", "moderator"] as const;
-  readonly AFFILIATION = [
+  static readonly ROLE = [
+    "none",
+    "visitor",
+    "participant",
+    "moderator",
+  ] as const;
+  static readonly AFFILIATION = [
     "none",
     "outcast",
     "member",
     "admin",
     "owner",
   ] as const;
-  /** 存储已加入的房间信息，键是room jid */
-  readonly rooms: Map<string, MUCItem> = new Map();
-  connection: Connection;
-
-  constructor(connection: Connection) {
-    this.connection = connection;
-    connection.on("presence", (stanza) => {});
-  }
 
   /**
    * 加入MUC
@@ -96,7 +93,7 @@ export class MUC {
    *   - password 房间密码
    * @param timeout 超时时间，默认为5分钟
    */
-  join(
+  static createJoinPres(
     room: string | JID,
     nick: string,
     options?: JoinOptions,
@@ -104,8 +101,13 @@ export class MUC {
   ) {
     if (typeof room === "string") room = new JID(room);
     const roomJID = `${room.bare}/${nick}`;
-    const pres = this.connection.createPres(roomJID);
-    const x = implementation.createDocument(this.NS.BASE, "x", null);
+    const pres = implementation.createDocument(
+      "jabber:client",
+      "presence",
+      null
+    );
+    pres.documentElement!.setAttribute("to", roomJID);
+    const x = implementation.createDocument(MUC.NS.BASE, "x", null);
 
     if (options) {
       const { maxchars, maxstanzas, seconds, since, password } = options;
@@ -122,17 +124,7 @@ export class MUC {
       x.appendChild(history);
     }
     pres.appendChild(x);
-    this.connection.sendAsync(pres.documentElement, timeout).then((res) => {
-      // 如果加入失败，服务端会返回一个错误的presence
-      if (res.getAttribute("type") === "error") {
-        throw new XMPPError(res, "加入房间失败");
-      } else if (res.getAttribute("type") === null) {
-        // 如果没有返回类型，说明加入成功
-        console.log("加入房间成功", res);
-      } else {
-        console.error("未知类型", res);
-      }
-    });
+    return pres.documentElement!;
   }
 
   /**
@@ -140,76 +132,35 @@ export class MUC {
    * @param to 包含自己昵称的完整的room JID
    * @param reason 原因
    */
-  leave(to: string | JID, reason?: string) {
-    const pres = this.connection.createPres(to, "unavailable");
+  static createLeavePres(to: string | JID, reason?: string) {
+    if (typeof to !== "string") to = to.toString();
+    const pres = implementation.createDocument(
+      "jabber:client",
+      "presence",
+      null
+    );
+    pres.documentElement!.setAttribute("to", to);
+    pres.documentElement!.setAttribute("type", "unavailable");
     if (reason) {
       const status = pres.createElement("status");
       status.textContent = reason;
       pres.appendChild(status);
     }
-    this.connection.sendAsync(pres.documentElement).then((res) => {
-      if (res.getAttribute("type") === "unavailable") {
-        console.log("离开房间成功");
-      } else if (res.getAttribute("type") === "error") {
-        throw new XMPPError(res, "离开房间失败");
-      } else {
-        console.error("未知类型", res);
-        throw new XMPPError(res, "未知类型");
-      }
-    });
+    return pres.documentElement!;
   }
 
-  setNick(room: string | JID, nick: string): Promise<Element> {
+  static createSetNickPres(room: string | JID, nick: string) {
     if (typeof room === "string") room = new JID(room);
-    if (!this.rooms.has(room.bare)) throw new Error("未加入房间");
 
-    const roomJID = `${room.bare}/${nick}`;
-    const pres = this.connection.createPres(roomJID);
-    const id = uuidv4();
-    pres.documentElement.setAttribute("id", id);
-
-    const selfRoomJid = `${room.bare}/${this.rooms.get(room.bare)!.nick}`;
-
-    return new Promise((resolve, reject) => {
-      const handler = (presence: Presence) => {
-        // TODO: 应该更加优雅的处理
-        const stanza = presence.xml;
-        // 处理错误响应
-        if (stanza.getAttribute("id") === id) {
-          clearTimeout(timeoutId);
-          this.connection.off("presence", handler);
-          if (stanza.getAttribute("type") === "error") {
-            return reject(new XMPPError(stanza, "设置昵称失败"));
-          }
-          return reject(new XMPPError(stanza, "未知类型"));
-        }
-
-        // 处理成功响应
-        if (stanza.getAttribute("from") === selfRoomJid) {
-          const x = stanza.getElementsByTagNameNS(this.NS.USER, "x")[0];
-          if (!x) return;
-
-          const hasSuccess = Array.from(x.getElementsByTagName("status")).some(
-            (s) => s.textContent === MUCStatusCode.SelfPresence
-          );
-
-          if (hasSuccess) {
-            clearTimeout(timeoutId);
-            this.connection.off("presence", handler);
-            console.log("设置昵称成功");
-            resolve(stanza);
-          }
-        }
-      };
-
-      const timeoutId = setTimeout(() => {
-        this.connection.off("presence", handler);
-        reject(new TimeoutError("设置昵称超时"));
-      }, 10000);
-
-      this.connection.on("presence", handler);
-      this.connection.send(pres.documentElement);
-    });
+    const newRoomJID = `${room.bare}/${nick}`;
+    const pres = implementation.createDocument(
+      "jabber:client",
+      "presence",
+      null
+    );
+    pres.documentElement!.setAttribute("to", newRoomJID);
+    pres.documentElement!.setAttribute("id", uuidv4());
+    return pres.documentElement!;
   }
 
   mediatedinvite(room: string | JID, recipient: string | JID, reason = "") {
@@ -218,32 +169,157 @@ export class MUC {
       "message",
       null
     );
-    message.documentElement.setAttribute("to", room.toString());
-    const x = message.createElementNS(this.NS.USER, "x");
+    message.documentElement!.setAttribute("to", room.toString());
+    const x = message.createElementNS(MUC.NS.USER, "x");
     const invite = message.createElement("invite");
     invite.setAttribute("to", recipient.toString());
     const reasonElement = message.createElement("reason");
     reasonElement.textContent = reason;
     invite.appendChild(reasonElement);
     x.appendChild(invite);
-    message.documentElement.appendChild(x);
+    message.documentElement!.appendChild(x);
+    return message.documentElement!;
 
-    this.connection
-      .sendAsync(message.documentElement)
-      .then((res) => {
-        if (res.getAttribute("type") === "error") {
-          throw new XMPPError(res, "邀请失败");
-        } else {
-          console.error("返回奇怪的东西", res);
-        }
-      })
-      .catch((res) => {
-        // TODO: 应该和上面一样处理
-        if (res instanceof TimeoutError) {
-          return true;
-        } else {
-          throw res;
-        }
-      });
+    // this.connection
+    //   .sendAsync(message.documentElement)
+    //   .then((res) => {
+    //     if (res.getAttribute("type") === "error") {
+    //       throw new XMPPError(res, "邀请失败");
+    //     } else {
+    //       console.error("返回奇怪的东西", res);
+    //     }
+    //   })
+    //   .catch((res) => {
+    //     // TODO: 应该和上面一样处理
+    //     if (res instanceof TimeoutError) {
+    //       return true;
+    //     } else {
+    //       throw res;
+    //     }
+    //   });
   }
+
+  static getReservedNick() {}
+
+  static createRequestVoiceMsg(room: string | JID) {
+    if (typeof room !== "string") room = room.toString();
+    // XXX: 感觉不如从字符串构建
+    const form = Form.createFormEl({
+      type: "submit",
+      fields: [
+        {
+          var: "FORM_TYPE",
+          values: ["http://jabber.org/protocol/muc#request"],
+        },
+        {
+          var: "muc#role",
+          type: "list-single",
+          label: "Requested role",
+          values: ["participant"],
+        },
+      ],
+    });
+
+    const message = implementation.createDocument(
+      "jabber:client",
+      "message",
+      null
+    );
+    message.documentElement!.setAttribute("to", room);
+    message.documentElement!.appendChild(form);
+    return message.documentElement!;
+  }
+
+  static createSetSubjectMsg(room: string | JID, subject: string) {
+    const message = implementation.createDocument(
+      "jabber:client",
+      "message",
+      null
+    );
+    message.documentElement!.setAttribute("to", room.toString());
+    const subjectElement = message.createElement("subject");
+    subjectElement.textContent = subject;
+    message.documentElement!.appendChild(subjectElement);
+    return message.documentElement!;
+  }
+
+  static createSetAffiliationIq(
+    room: string | JID,
+    jid: string | JID,
+    affiliation: "none" | "outcast" | "member" | "admin" | "owner",
+    reason?: string
+  ) {
+    if (typeof room !== "string") room = room.toString();
+    if (typeof jid !== "string") jid = jid.toString();
+
+    const iq = implementation.createDocument("jabber:client", "iq", null);
+    iq.documentElement!.setAttribute("to", room);
+    iq.documentElement!.setAttribute("type", "set");
+
+    const query = iq.createElementNS(MUC.NS.ADMIN, "query");
+    const item = iq.createElement("item");
+
+    if (reason) {
+      const reasonEl = iq.createElement("reason");
+      reasonEl.textContent = reason;
+      item.appendChild(reasonEl);
+    }
+
+    item.setAttribute("jid", jid);
+    item.setAttribute("affiliation", affiliation);
+    query.appendChild(item);
+    iq.documentElement!.appendChild(query);
+    return iq.documentElement!;
+  }
+
+  static createSetRoleIq(
+    room: string | JID,
+    nick: string | JID,
+    role: "none" | "visitor" | "participant" | "moderator",
+    reason?: string
+  ) {
+    if (typeof room !== "string") room = room.toString();
+    if (typeof nick !== "string") nick = nick.toString();
+    const iq = implementation.createDocument("jabber:client", "iq", null);
+    iq.documentElement!.setAttribute("to", room);
+    iq.documentElement!.setAttribute("type", "set");
+
+    const query = iq.createElementNS(MUC.NS.ADMIN, "query");
+    const item = iq.createElement("item");
+    item.setAttribute("nick", nick);
+    item.setAttribute("role", role);
+    if (reason) {
+      const reasonEl  = iq.createElement("reason");
+      reasonEl.textContent = reason;
+      item.appendChild(reasonEl);
+    }
+    query.appendChild(item);
+    iq.documentElement!.appendChild(query);
+    return iq.documentElement!;
+  }
+
+  static createGetRoomConfigIq(room: string | JID) {
+    if (typeof room !== "string") room = room.toString();
+    const iq = implementation.createDocument("jabber:client", "iq", null);
+    iq.documentElement!.setAttribute("to", room);
+    iq.documentElement!.setAttribute("type", "get");
+
+    const query = iq.createElementNS(MUC.NS.OWNER, "query");
+    iq.documentElement!.appendChild(query);
+    return iq.documentElement!;
+  }
+
+  static createSetRoomConfigIq(room: string | JID, form: DataForm) {
+    if (typeof room !== "string") room = room.toString();
+    const iq = implementation.createDocument("jabber:client", "iq", null);
+    iq.documentElement!.setAttribute("to", room);
+    iq.documentElement!.setAttribute("type", "set");
+
+    const query = iq.createElementNS(MUC.NS.OWNER, "query");
+    const formEl = Form.createFormEl(form);
+    query.appendChild(formEl);
+    iq.documentElement!.appendChild(query);
+    return iq.documentElement!;
+  }
+
 }
