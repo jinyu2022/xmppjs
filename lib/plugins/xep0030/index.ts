@@ -12,25 +12,25 @@ export class XEP0030 extends Disco implements Plugin {
     this.addFeature(this.NS.DISCO_ITEMS);
 
     this.connection.on("iq", (iq) => {
+      if (iq.type !== "get") return;
       // TODO: 不应该操作xml，应该操作对象
       const stanza = iq.xml;
       // 如果节是向客户端询问disco信息，则回复
       // 获取命名空间
       const query = stanza.getElementsByTagName("query")[0];
+      if (!query) return;
+
       const from = stanza.getAttribute("from")!;
       const id = stanza.getAttribute("id")!;
       const node = query.getAttribute("node");
       if (query.namespaceURI === this.NS.DISCO_INFO) {
         const reply = this.createInfoResult(from, id, node);
         this.connection.send(reply);
-        console.log(stanza);
       }else if (query.namespaceURI === this.NS.DISCO_ITEMS) {
         const reply = this.createItemsResult(from, id, node);
         this.connection.send(reply);
-        console.log(stanza);
       }else{
-        console.error(stanza);
-        throw new Error("未知的disco查询");
+        console.warn("无关disco查询", query);
       }
     });
   }

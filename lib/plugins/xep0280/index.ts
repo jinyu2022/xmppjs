@@ -1,4 +1,5 @@
 import { Connection } from "../../connection";
+import { Message } from "../../stanza";
 import type { Plugin } from "../types";
 import { Carbons } from "./carbons";
 export class XEP0280 extends Carbons implements Plugin {
@@ -15,7 +16,7 @@ export class XEP0280 extends Carbons implements Plugin {
       }
     }
     this.connection = connection;
-    this.connection.XEP0030!.addFeature(this.NS);
+    this.connection.XEP0030!.addFeature(XEP0280.NS);
   }
 
   init() {
@@ -32,7 +33,7 @@ export class XEP0280 extends Carbons implements Plugin {
 
           const features = query.getElementsByTagName("feature");
           const hasFeature = Array.from(features).some(
-            (feature) => feature.getAttribute("var") === this.NS
+            (feature) => feature.getAttribute("var") === XEP0280.NS
           );
           if (hasFeature) {
             console.log("服务器支持 XEP-0280");
@@ -44,21 +45,27 @@ export class XEP0280 extends Carbons implements Plugin {
     });
 
     this.connection.registerStanzaPlugin('message',(message) => {
-      const carbon = message.xml.getElementsByTagNameNS(this.NS, 'received ')[0];
+      const carbon = message.xml.getElementsByTagNameNS(XEP0280.NS, 'received')[0];
       if (carbon) {
-        message.carbon = {
+        message.addProperty('carbon', {
           type: 'received',
-          forward: message.xml.getElementsByTagName('forwarded')[0],
-        };
-        return true;
+          forwarded: message.xml.getElementsByTagName('forwarded')[0],
+        });
       }
-      return false;
     })
-    this.connection.registerEventPlugin('carbon_received', {
+
+    this.connection.registerEventPlugin('carbon:received', {
       tagName: 'message',
       matcher:(message) => {
         return !!(message?.carbon && message.carbon.type === 'received');
       },
+    })
+
+    this.connection.registerEventPlugin('carbon:sent',{
+      tagName: 'message',
+      matcher:(message) => {
+        return !!(message?.carbon && message.carbon.type === 'sent');
+      }
     })
   }
 }
@@ -66,10 +73,19 @@ export class XEP0280 extends Carbons implements Plugin {
 declare module "../../stanza" {
   interface Message {
     /** 由插件XEP0280添加 */
-    carbon?: {
+    readonly carbon?: {
       type: 'received'| 'sent';
-      forward: Element;
+      forwarded: Element;
     }
+  }
+}
+
+declare module "../../connection" {
+  interface SocketEventMap {
+    /** 由插件XEP0280添加 */
+    "carbon:received": Message
+    /** 由插件XEP0280添加 */
+    "carbon:sent": Message
   }
 }
 
