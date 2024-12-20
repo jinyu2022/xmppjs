@@ -14,9 +14,11 @@ export class Delay {
         const delayFrom = delayElement.getAttribute("from");
         const delayReason = delayElement.textContent;
         return {
-            stamp: XMPPDateTime.parseDateTime(delayStamp!),
-            from: delayFrom,
-            reason: delayReason,
+            delay: {
+                stamp: XMPPDateTime.parseDateTime(delayStamp!),
+                from: delayFrom,
+                reason: delayReason,
+            }
         };
     }
 

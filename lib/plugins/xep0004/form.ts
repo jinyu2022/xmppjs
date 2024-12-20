@@ -50,9 +50,10 @@ export class Form {
     /**
      * 将XEP-0004表单解析为对象
      * @param form NS为jabber:x:data的<x>表单元素
+     * @returns 解析后的对象，键为form，值为DataForm对象
      */
-    static parseFormEl(form: Element):DataForm {
-        console.log(form);
+    static parseFormEl(form: Element): { form: DataForm; } {
+        // console.log(form);
         if (form.namespaceURI !== Form.NS) throw new Error("不是一个data form");
         const type = form.getAttribute("type") as FormType;
         const title = form.getElementsByTagName("title")[0]?.textContent ?? void 0;
@@ -64,16 +65,17 @@ export class Form {
                 fields: Form.parseFields(item),
             };
         });
-        const fields = Form.parseFields(form)
-        
+        const fields = Form.parseFields(form);
 
         return {
-            type,
-            title,
-            instructions,
-            reported,
-            items,
-            fields,
+            form: {
+                type,
+                title,
+                instructions,
+                reported,
+                items,
+                fields,
+            },
         };
     }
 
@@ -154,11 +156,9 @@ export class Form {
             form.documentElement!.appendChild(title);
         }
         if (data.instructions) {
-            for (const instruction of data.instructions) {
-                const instructions = form.createElement("instructions");
-                instructions.textContent = instruction;
-                form.documentElement!.appendChild(instructions);
-            }
+            const instructions = form.createElement("instructions");
+            instructions.textContent = data.instructions;
+            form.documentElement!.appendChild(instructions);
         }
         if (data.reported) {
             const reported = form.createElement("reported");

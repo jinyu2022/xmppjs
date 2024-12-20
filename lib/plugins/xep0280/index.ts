@@ -8,18 +8,19 @@ export class XEP0280 extends Carbons implements Plugin {
   readonly connection: Connection;
   constructor(connection: Connection) {
     super(connection);
-    // 检查依赖
-    for (const dep of this.dependencies) {
-      if (!connection[dep]) {
-        console.warn(`Carbons 需要 ${dep} 插件，现在自动注册`);
-        connection.registerPlugin(dep);
-      }
-    }
     this.connection = connection;
-    this.connection.XEP0030!.addFeature(XEP0280.NS);
   }
 
   init() {
+    // 检查依赖
+    for (const dep of this.dependencies) {
+      if (!this.connection[dep]) {
+        console.warn(`Carbons 需要 ${dep} 插件，现在自动注册`);
+        this.connection.registerPlugin(dep);
+      }
+    }
+    this.connection.XEP0030!.addFeature(XEP0280.NS);
+    
     this.connection.once("session:start", () => {
       // 查询服务器是否支持
       this.connection
@@ -44,15 +45,7 @@ export class XEP0280 extends Carbons implements Plugin {
         });
     });
 
-    this.connection.registerStanzaPlugin('message',(message) => {
-      const carbon = message.xml.getElementsByTagNameNS(XEP0280.NS, 'received')[0];
-      if (carbon) {
-        message.addProperty('carbon', {
-          type: 'received',
-          forwarded: message.xml.getElementsByTagName('forwarded')[0],
-        });
-      }
-    })
+    this.connection.registerStanzaPlugin('message',XEP0280.parseCarbonEl)
 
     this.connection.registerEventPlugin('carbon:received', {
       tagName: 'message',

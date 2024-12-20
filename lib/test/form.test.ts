@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Form } from '../plugins/xep0004/form';
-import { domParser } from '../shims';
+import { domParser, xmlSerializer } from '../shims';
 describe('Form', () => {
     describe('parseFormEl', () => {
         it('should parse a form element correctly', () => {
@@ -21,7 +21,7 @@ describe('Form', () => {
             const formElement = doc.documentElement;
             // console.log(formElement);
             // @ts-ignore
-            const parsedForm = Form.parseFormEl(formElement);
+            const parsedForm = Form.parseFormEl(formElement).form;
 
             expect(parsedForm).toEqual({
                 type: 'form',
@@ -64,7 +64,7 @@ describe('Form', () => {
             const dataForm = {
                 type: 'form' as const,
                 title: 'Test Form',
-                instructions: ['Fill out this form'],
+                instructions: 'Fill out this form',
                 fields: [
                     {
                         type: 'text-single' as const,

@@ -1,11 +1,11 @@
 import type { Connection } from "@/connection";
 import { Plugin } from "../types";
-import { MUC , JoinOptions, MUCItem, MUCStatusCode } from "./muc";
-import { XMPPError, TimeoutError } from "@/errors";
+import { MUC, JoinOptions, MUCStatusCode } from "./muc";
+import { XMPPError, TimeoutError } from "@/errors.ts";
 import { XEP0004 } from "../xep0004";
-import type { Presence } from "@/stanza";
 import { JID } from "@/JID";
-import type { DataForm,Field } from "../xep0004/form";
+import type { DataForm, Field } from "../xep0004/form";
+import type { MUCItem, MUCUserPres } from "./typing";
 
 export class XEP0045 extends MUC implements Plugin {
     readonly name = "XEP0045";
@@ -19,7 +19,7 @@ export class XEP0045 extends MUC implements Plugin {
         this.connection = connection;
     }
 
-    init() { 
+    init() {
         // 检查依赖
         for (const dep of this.dependencies) {
             if (!this.connection[dep]) {
@@ -29,6 +29,53 @@ export class XEP0045 extends MUC implements Plugin {
         }
 
         this.connection.XEP0030!.addFeature(XEP0045.NS.BASE);
+
+        this.connection.registerStanzaPlugin(
+            XEP0045.NS.USER,
+            XEP0045.parsePresUser
+        );
+        this.connection.registerEventPlugin("muc:join", {
+            tagName: "presence",
+            matcher: (pers: Presence) => {
+                return Boolean(pers.muc?.item && !pers.muc.statuses?.length);
+            },
+        });
+        this.connection.registerEventPlugin("muc:leave", {
+            tagName: "presence",
+            matcher: (pers: Presence) => {
+                return Boolean(pers.muc?.item && pers.type === "unavailable");
+            },
+        });
+        this.connection.registerEventPlugin("muc:groupchat", {
+            tagName: "message",
+            matcher: (msg) => {
+                return Boolean(msg.type === "groupchat" && msg.body);
+            },
+        });
+        this.connection.registerEventPlugin("muc:subject", {
+            tagName: "message",
+            matcher: (msg) => {
+                return Boolean(msg.type === "groupchat" && msg.subject && !msg.body);
+            },
+        });
+        this.connection.registerEventPlugin("muc:kick", {
+            tagName: "presence",
+            matcher: (pers) => {
+                return Boolean(pers.muc?.statuses?.includes(MUCStatusCode.Kicked));
+            },
+        });
+        this.connection.registerEventPlugin("muc:ban", {
+            tagName: "presence",
+            matcher: (pers) => {
+                return Boolean(pers.muc?.statuses?.includes(MUCStatusCode.Banned));
+            },
+        });
+        this.connection.registerEventPlugin("muc:destroy", {
+            tagName: "presence",
+            matcher: (pers) => {
+                return Boolean((pers.muc as MUCUserPres<"destroy">)?.destroy);
+            },
+        });
     }
 
     /**
@@ -57,7 +104,7 @@ export class XEP0045 extends MUC implements Plugin {
             throw new XMPPError(res, "加入房间失败");
         } else if (res.getAttribute("type") === null) {
             // 如果没有返回类型，说明加入成功
-            console.log("加入房间成功", res);
+            console.log("加入房间成功");
         } else {
             console.error("未知类型", res);
         }
@@ -102,7 +149,6 @@ export class XEP0045 extends MUC implements Plugin {
                     const hasSuccess = Array.from(x.getElementsByTagName("status")).some(
                         (s) => s.textContent === MUCStatusCode.SelfPresence
                     );
-
                     if (hasSuccess) {
                         clearTimeout(timeoutId);
                         this.connection.off("presence", handler);
@@ -131,9 +177,14 @@ export class XEP0045 extends MUC implements Plugin {
      * @param subject 主题
      * @link https://xmpp.org/extensions/xep-0045.html#enter-subject
      */
-    setSubject(room: string | JID, subject: string) {
+    async setSubject(room: string | JID, subject: string) {
         const msg = XEP0045.createSetSubjectMsg(room, subject);
-        this.connection.send(msg);
+        const res = await this.connection.sendAsync(msg);
+        if (res.getAttribute("type") === "error") {
+            throw new XMPPError(res, "设置主题失败");
+        } else if (res.getAttribute("type") === "groupchat") {
+            console.log("设置主题成功");
+        }
     }
 
     /**
@@ -147,7 +198,7 @@ export class XEP0045 extends MUC implements Plugin {
         this.connection.sendAsync(iq).then((res) => {
             if (res.getAttribute("type") === "error") {
                 throw new XMPPError(res, "踢人失败");
-            }else if (res.getAttribute("type") === "result") {
+            } else if (res.getAttribute("type") === "result") {
                 console.log("踢人成功");
             }
         });
@@ -158,7 +209,7 @@ export class XEP0045 extends MUC implements Plugin {
         this.connection.sendAsync(iq).then((res) => {
             if (res.getAttribute("type") === "error") {
                 throw new XMPPError(res, "禁言失败");
-            }else if (res.getAttribute("type") === "result") {
+            } else if (res.getAttribute("type") === "result") {
                 console.log("禁言成功");
             }
         });
@@ -171,7 +222,7 @@ export class XEP0045 extends MUC implements Plugin {
             throw new XMPPError(res, "获取房间配置失败");
         }
         const formEl = res.getElementsByTagNameNS(XEP0004.NS, "x")[0];
-        const form = XEP0004.parseFormEl(formEl);
+        const form = XEP0004.parseFormEl(formEl).form;
         return form;
     }
 
@@ -183,15 +234,15 @@ export class XEP0045 extends MUC implements Plugin {
         }
         return res;
     }
-    
+
     /**
      * 创建私人群聊
      */
     async createPrivateRoom(room: string, roomName: string) {
         // 首先请求配置表单
         const form = await this.getRoomConfig(room);
-        form.type = "submit"
-        const fields  = form.fields;
+        form.type = "submit";
+        const fields = form.fields;
         // 去除options
         for (const field of fields) {
             delete field.options;
@@ -223,7 +274,7 @@ export class XEP0045 extends MUC implements Plugin {
         const res = await this.setRoomConfig(room, form);
         if (res.getAttribute("type") === "result") {
             console.log("创建房间成功");
-        }else if (res.getAttribute("type") === "error") {
+        } else if (res.getAttribute("type") === "error") {
             throw new XMPPError(res, "创建房间失败");
         } else {
             throw new XMPPError(res, "未知的stanza类型");
@@ -238,8 +289,8 @@ export class XEP0045 extends MUC implements Plugin {
     async createPublicRoom(room: string, roomName: string) {
         // 首先请求配置表单
         const form = await this.getRoomConfig(room);
-        form.type = "submit"
-        const fields  = form.fields;
+        form.type = "submit";
+        const fields = form.fields;
         // 去除options
         for (const field of fields) {
             delete field.options;
@@ -263,10 +314,39 @@ export class XEP0045 extends MUC implements Plugin {
         const res = await this.setRoomConfig(room, form);
         if (res.getAttribute("type") === "result") {
             console.log("创建房间成功");
-        }else if (res.getAttribute("type") === "error") {
+        } else if (res.getAttribute("type") === "error") {
             throw new XMPPError(res, "创建房间失败");
         } else {
             throw new XMPPError(res, "未知的stanza类型");
         }
     }
 }
+
+import type { Message, Presence } from "@/stanza";
+
+declare module "@/stanza" {
+    interface Presence {
+        muc?: MUCUserPres<"destroy" | "invite" | "decline">;
+    }
+}
+declare module "@/connection" {
+    interface SocketEventMap {
+        "muc:join"?: Presence;
+        "muc:leave"?: Presence;
+        /** 接受到来自群聊的消息时触发 */
+        "muc:groupchat"?: Message;
+        /** 收到群聊主题时触发 */
+        "muc:subject"?: Message;
+        "muc:mediated-invite"?: Presence;
+        // "muc:direct-invite"?: Presence;
+        /** 邀请被拒绝 */
+        "muc:decline"?: Presence;
+        /** 房间被销毁 */
+        "muc:destroy"?: Presence;
+        "muc:kick"?: Presence;
+        "muc:ban"?: Presence;
+        "muc:voice-request"?: Presence;
+    }
+}
+
+export default XEP0045;

@@ -3,13 +3,11 @@ import { defineConfig } from 'vite'
 import { resolve } from 'path';
 // import { defineConfig } from 'vitest/config';
 export default defineConfig({
-  define: {
     resolve: {
       alias: {
         '@': resolve(__dirname, 'lib'),
       },
     },
-  },
   build: {
     lib: {
       entry: './lib/main.ts',

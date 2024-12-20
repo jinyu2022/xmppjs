@@ -1,6 +1,7 @@
 import type { Connection } from "./connection";
 import { xmlSerializer } from "./shims";
 
+type presShow = "away" | "chat" | "dnd" | "xa" ;
 export class StanzaBase {
   static readonly NS = "jabber:client" as const;
 
@@ -10,7 +11,7 @@ export class StanzaBase {
   /** 标签名，message、persence、iq */
   readonly tagName: string;
   // readonly xmlString: string;
-  readonly id: string | null
+  readonly id: string | null;
   readonly to: string | null;
   readonly from: string | null;
   [key: string]: unknown;
@@ -42,7 +43,6 @@ export class StanzaBase {
     } else {
       throw new Error("未知的stanza");
     }
-
   }
 
   send(xml: Element) {
@@ -54,7 +54,7 @@ export class StanzaBase {
    * @param name 属性名
    * @param value 属性值
    */
-  addProperty(name: keyof this, value: string|object|Set<unknown>) {
+  addProperty(name: keyof this, value: string | object | Set<unknown>) {
     Object.defineProperty(this, name, {
       value: value,
       writable: false, // 属性不可修改
@@ -62,6 +62,7 @@ export class StanzaBase {
       configurable: true, // 属性可删除或重新定义
     });
   }
+
   toString() {
     return xmlSerializer.serializeToString(this.xml);
   }
@@ -84,18 +85,20 @@ export class Iq extends StanzaBase {
     const from = iq.getAttribute("from");
     const type = iq.getAttribute("type");
     const childrens = Array.from(iq.childNodes).filter(
-      child => child.nodeType === 1
+      (child) => child.nodeType === 1
     );
     const children = childrens.reduce((acc, child) => {
       acc[(child as Element).tagName] = child as Element;
       return acc;
     }, {} as Record<string, Element>);
     return {
-      id,
-      to,
-      from,
-      type,
-      ...children
+      iq: {
+        id,
+        to,
+        from,
+        type,
+        ...children,
+      },
     };
   }
 }
@@ -107,7 +110,8 @@ export class Message extends StanzaBase {
   readonly body?: string | null;
   constructor(stanza: Element, connection: Connection) {
     super(stanza, connection);
-    const {to, from, type, subject, body, ...children} = Message.parseMessage(stanza);
+    const { to, from, type, subject, body, ...children } =
+      Message.parseMessage(stanza).message;
     this.type = type;
     this.subject = subject;
     this.body = body;
@@ -116,14 +120,17 @@ export class Message extends StanzaBase {
     }
   }
 
-  static parseMessage(message: Element):{
-    to: string | null;
-    from: string | null;
-    type: string;
-    subject: string | null;
-    body: string | null;
-    [key: string]: Element| string | null;
-  } {
+  static parseMessage(message: Element): Record<
+    "message",
+    {
+      to: string | null;
+      from: string | null;
+      type: string;
+      subject: string | null;
+      body: string | null;
+      [key: string]: Element | string | null;
+    }
+  > {
     // const id = message.getAttribute("id");
     const to = message.getAttribute("to");
     const from = message.getAttribute("from");
@@ -131,18 +138,18 @@ export class Message extends StanzaBase {
     console.log("type", message.getAttribute("type"));
     // 查找直接子节点subject
     const subjectEl = Array.from(message.childNodes).filter(
-      child => child.nodeType === 1 && 
-      (child as Element).tagName === "subject"
+      (child) =>
+        child.nodeType === 1 && (child as Element).tagName === "subject"
     )[0];
     // 查找直接子节点body
     const bodyEl = Array.from(message.childNodes).filter(
-      child => child.nodeType === 1 && 
-      (child as Element).tagName === "body"
+      (child) => child.nodeType === 1 && (child as Element).tagName === "body"
     )[0];
     // 获取其余子节点
     const childrens = Array.from(message.childNodes).filter(
-      child => child.nodeType === 1 && 
-      !["subject", "body"].includes((child as Element).tagName)
+      (child) =>
+        child.nodeType === 1 &&
+        !["subject", "body"].includes((child as Element).tagName)
     );
 
     // 转为object，键为tagName，值为Element
@@ -151,12 +158,14 @@ export class Message extends StanzaBase {
       return acc;
     }, {} as Record<string, Element>);
     return {
-      to,
-      from,
-      type,
-      subject: subjectEl?.textContent,
-      body: bodyEl?.textContent,
-      ...children
+      message: {
+        to,
+        from,
+        type,
+        subject: subjectEl?.textContent,
+        body: bodyEl?.textContent,
+        ...children,
+      },
     };
   }
 }
@@ -164,27 +173,37 @@ export class Message extends StanzaBase {
 export class Presence extends StanzaBase {
   readonly type: string | null;
   readonly tagName = "presence";
+  readonly show?: presShow;
+  readonly status?: string | null;
   constructor(stanza: Element, connection: Connection) {
     super(stanza, connection);
     this.type = stanza.getAttribute("type");
+    this.show = stanza.getElementsByTagName("show")[0]?.textContent as presShow;
+    this.status = stanza.getElementsByTagName("status")[0]?.textContent
   }
 
   static parsePresence(presence: Element) {
     const to = presence.getAttribute("to");
     const from = presence.getAttribute("from");
     const type = presence.getAttribute("type");
+    const show = presence.getElementsByTagName("show")[0]?.textContent as presShow;
+    const status = presence.getElementsByTagName("status")[0]?.textContent
     const childrens = Array.from(presence.childNodes).filter(
-      child => child.nodeType === 1
+      (child) => child.nodeType === 1
     );
     const children = childrens.reduce((acc, child) => {
       acc[(child as Element).tagName] = child as Element;
       return acc;
     }, {} as Record<string, Element>);
     return {
-      to,
-      from,
-      type,
-      ...children
+      presence: {
+        to,
+        from,
+        type,
+        show,
+        status,
+        ...children,
+      },
     };
   }
 }

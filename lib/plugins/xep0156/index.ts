@@ -3,10 +3,10 @@ import { Plugin } from "../types";
 import { discoverAltXMPP } from "./discoverAltXMPP";
 
 class XEP0156 implements Plugin {
+  readonly name = "XEP-0156: Discovering Alternative XMPP Connection Methods";
   readonly connection: Connection;
   constructor(connection: Connection) {
     this.connection = connection;
-    // connection["discoverAltXMPP"] = discoverAltXMPP;
   }
 
   init() {
@@ -15,7 +15,7 @@ class XEP0156 implements Plugin {
       console.log("已经有url，不需要再初始化");
       return;
     }else if (!this.connection.socket){
-      console.log("未连接，不需要再初始化");
+      console.log("未连接，不需要初始化");
       return;
     }else if (!this.connection.protocol){
       console.log("未指定协议，不需要再初始化");
