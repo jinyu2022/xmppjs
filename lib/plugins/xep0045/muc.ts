@@ -4,6 +4,7 @@ import { JID } from "../../JID";
 import { implementation } from "../../shims";
 import { XMPPError, TimeoutError } from "../../errors";
 import { Form, DataForm } from "../xep0004/form";
+import { MUCUserPres } from "./typing";
 export interface JoinOptions {
   maxchars?: number;
   maxstanzas?: number;
@@ -12,13 +13,6 @@ export interface JoinOptions {
   password?: string;
 }
 
-export interface MUCItem {
-  role: "none" | "visitor" | "participant" | "moderator";
-  affiliation: "none" | "outcast" | "member" | "admin" | "owner";
-  show: "away" | "chat" | "dnd" | "xa";
-  status?: string;
-  nick?: string;
-}
 export enum MUCStatusCode {
   /** 100 - 用户的完整 JID 对所有成员可见 */
   FullJIDVisible = "100",
@@ -86,7 +80,7 @@ export class MUC {
    * @param room 要加入的房间
    * @param nick 昵称
    * @param options 加入选项，全部可选
-   *   - maxchars 最大字符数
+   *   - maxchars 最大字符数，不接受则设置为0
    *   - maxstanzas 最大消息数
    *   - seconds 最大秒数
    *   - since 从某个时间开始
@@ -112,18 +106,19 @@ export class MUC {
     if (options) {
       const { maxchars, maxstanzas, seconds, since, password } = options;
       const history = x.createElement("history");
-      if (maxchars) history.setAttribute("maxchars", maxchars.toString());
+      if (maxchars !== void 0) history.setAttribute("maxchars", maxchars.toString());
       if (maxstanzas) history.setAttribute("maxstanzas", maxstanzas.toString());
       if (seconds) history.setAttribute("seconds", seconds.toString());
       if (since) history.setAttribute("since", since.toISOString());
+      // NOTE：有顺序要求
+      x.documentElement!.appendChild(history);
       if (password) {
         const passwordElement = x.createElement("password");
         passwordElement.textContent = password;
-        x.appendChild(passwordElement);
+        x.documentElement!.appendChild(passwordElement);
       }
-      x.appendChild(history);
     }
-    pres.appendChild(x);
+    pres.documentElement!.appendChild(x.documentElement!);
     return pres.documentElement!;
   }
 
@@ -144,7 +139,7 @@ export class MUC {
     if (reason) {
       const status = pres.createElement("status");
       status.textContent = reason;
-      pres.appendChild(status);
+      pres.documentElement!.appendChild(status);
     }
     return pres.documentElement!;
   }
@@ -289,7 +284,7 @@ export class MUC {
     item.setAttribute("nick", nick);
     item.setAttribute("role", role);
     if (reason) {
-      const reasonEl  = iq.createElement("reason");
+      const reasonEl = iq.createElement("reason");
       reasonEl.textContent = reason;
       item.appendChild(reasonEl);
     }
@@ -322,4 +317,105 @@ export class MUC {
     return iq.documentElement!;
   }
 
+  /**
+   * 解析NS为muc#user的presence
+   * @param presence
+   */
+  static parsePresUser(xEl: Element): { muc: MUCUserPres } | { muc: {} } {
+    // message节也可能有muc#user，但只是标识，不包含具体信息，直接返回空对象
+    if (!xEl.hasChildNodes()) return { muc: {} };
+
+    const declineEl = xEl.getElementsByTagName("decline")[0];
+    if (declineEl) {
+      const declineTo = declineEl.getAttribute("to");
+      const declineFrom = declineEl.getAttribute("from");
+      const declineReason =
+        declineEl.getElementsByTagName("reason")[0]?.textContent;
+      const decline = {
+        to: declineTo,
+        from: declineFrom,
+        reason: declineReason,
+      };
+      return {
+        muc: decline,
+      };
+    }
+
+    const invitesEl = xEl.getElementsByTagName("invite");
+    if (invitesEl.length > 0) {
+      const password = xEl.getElementsByTagName("password")[0]?.textContent;
+      const invites = Array.from(invitesEl).map((invite) => {
+        const inviteTo = invite.getAttribute("to");
+        const inviteFrom = invite.getAttribute("from");
+        const inviteReason =
+          invite.getElementsByTagName("reason")[0]?.textContent;
+        const inviteThread = invite.getAttribute("thread");
+        const continueThread = invite
+          .getElementsByTagName("continue")[0]
+          ?.getAttribute("thread");
+        return {
+          inviteTo,
+          inviteFrom,
+          inviteReason,
+          inviteThread,
+          continueThread,
+          password,
+        };
+      });
+
+      return {
+        muc: invites,
+      };
+    }
+    // Q: 按照XML 架构，item元素可以有多个，但是我在例子中只看到一个
+    const itemEl = xEl.getElementsByTagName("item")[0];
+    if (xEl.getElementsByTagName("item").length > 1) {
+      console.error("item元素有多个", xEl);
+    }
+    const affiliation = itemEl.getAttribute("affiliation");
+    const role = itemEl.getAttribute("role");
+    const jid = itemEl.getAttribute("jid");
+    const nick = itemEl.getAttribute("nick");
+    const itemReason = itemEl.getElementsByTagName("reason")[0]?.textContent;
+    const actorEl = itemEl.getElementsByTagName("actor")[0];
+    const actorJid = actorEl?.getAttribute("jid");
+    const actorNick = actorEl?.getAttribute("nick");
+    const item = {
+      affiliation,
+      role,
+      jid,
+      nick,
+      reason: itemReason,
+      actor: {
+        jid: actorJid,
+        nick: actorNick,
+      },
+    };
+    const destroy = xEl.getElementsByTagName("destroy")[0];
+    if (destroy) {
+      const destroyJid = destroy?.getAttribute("jid");
+      const destroyReason =
+        destroy.getElementsByTagName("reason")[0]?.textContent;
+
+      return {
+        muc: {
+          item,
+          destroy: {
+            jid: destroyJid,
+            reason: destroyReason,
+          },
+        },
+      };
+    }
+
+    const statuses = Array.from(xEl.getElementsByTagName("status")).map(
+      (status) => status.getAttribute("code")!
+    );
+    return {
+      muc: {
+        item,
+        statuses,
+      },
+    };
+  }
 }

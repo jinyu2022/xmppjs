@@ -15,7 +15,7 @@ type Forwarded = {
 export class Forward {
   static readonly NS = "urn:xmpp:forward:0";
 
-  static parseForwarded(message: Element): Forwarded {
+  static parseForwardedEl(message: Element): { forwarded: Forwarded } {
     const forwarded =
       message.tagName === "forwarded"
         ? message
@@ -34,8 +34,10 @@ export class Forward {
     }
     const childrenTag = childrens[0].tagName as keyof Base;
     return {
-      delay: delayElement,
-      [childrenTag]: childrens[0],
+      forwarded: {
+        delay: delayElement,
+        [childrenTag]: childrens[0],
+      },
     };
   }
 }

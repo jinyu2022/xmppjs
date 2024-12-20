@@ -55,20 +55,25 @@ export class Carbons {
       carbon.tagName === "received"
         ? carbon
         : carbon.getElementsByTagName("received")[0];
+    if (received) {
+      return {
+        carbon: {
+          type: "received",
+          forwarded: received.getElementsByTagName("forwarded")[0],
+        },
+      };
+    }
 
     const sent =
       carbon.tagName === "sent"
         ? carbon
         : carbon.getElementsByTagName("sent")[0];
-    if (received) {
+    if (sent) {
       return {
-        type: "received",
-        forwarded: received.getElementsByTagName("forwarded")[0],
-      };
-    } else if (sent) {
-      return {
-        type: "sent",
-        forwarded: sent.getElementsByTagName("forwarded")[0],
+        carbon: {
+          type: "sent",
+          forwarded: sent.getElementsByTagName("forwarded")[0],
+        },
       };
     } else {
       throw new XMPPError(carbon, "未找到 carbon 元素");

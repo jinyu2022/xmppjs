@@ -1,12 +1,11 @@
 import { JID } from "./JID";
 import WebSocketClient from "./websocket";
 import type { Protocol, Options } from "./types";
-import { domParser ,implementation } from "./shims";
+import { domParser, implementation } from "./shims";
 import { XMPPError, TimeoutError } from "./errors";
 import { Message, Iq, Presence, StanzaBase } from "./stanza";
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
-
 interface StanzaHandlerMap {
   message: (message: Message) => void;
   iq: (iq: Iq) => void;
@@ -14,16 +13,20 @@ interface StanzaHandlerMap {
   others: (other: StanzaBase) => void;
 }
 
-type StanzaPlugins = {
-  [K in keyof StanzaHandlerMap]: StanzaHandlerMap[K][];
-};
+// type StanzaPlugins = {
+//   [K in keyof StanzaHandlerMap]: StanzaHandlerMap[K][];
+// };
+
+// type StanzaPlugins = {
+
+// }
 
 interface EventHandlerMap {
   message: (message: Message) => boolean;
   iq: (iq: Iq) => boolean;
   presence: (presence: Presence) => boolean;
   others: (other: StanzaBase) => boolean;
-};
+}
 // 事件插件映射类型
 interface EventPluginMap<K extends keyof EventHandlerMap> {
   eventName: keyof SocketEventMap;
@@ -49,7 +52,7 @@ export interface SocketEventMap {
 export interface Connection extends EventEmitter {
   on<E extends keyof SocketEventMap>(
     event: E,
-    listener: (arg: SocketEventMap[E]) => void 
+    listener: (arg: SocketEventMap[E]) => void
   ): this;
 
   emit<E extends keyof SocketEventMap>(
@@ -69,7 +72,7 @@ export class Connection extends EventEmitter {
   /** 连接协议，xmpp仅node环境可用，目前仅实现了ws */
   protocol: Protocol = "ws";
   /** 连接的url，不要前缀 */
-  address?: string;
+  host?: string;
   /** 连接的端口 */
   port?: string;
   /** 连接的路径 */
@@ -80,18 +83,17 @@ export class Connection extends EventEmitter {
   tls = true;
   /* 当前的连接 */
   socket: WebSocketClient | null = null;
-  // private features: Set<string> = new Set();
-  // 插件
-  private readonly stanzaPlugins: StanzaPlugins = {
-    message: [],
-    iq: [],
-    presence: [],
-    others: [],
-  } as const;
+  private readonly pendingPlugins = new Map<string, PluginConstructor>();
 
-  private readonly eventPlugins:{
+  /** stanza处理插件，键是NS，值是函数 */
+  private readonly stanzaPlugins = new Map<
+    string,
+    (stanza: Element) => Record<string, unknown>
+  >([]);
+
+  private readonly eventPlugins: {
     [K in keyof EventHandlerMap]: EventPluginMap<K>[];
-  }  = {
+  } = {
     message: [],
     iq: [],
     presence: [],
@@ -99,14 +101,14 @@ export class Connection extends EventEmitter {
   } as const;
 
   // [plugin: keyof typeof plugins]: Plugin | undefined;
-  [name: string]: any;
+  [name: string]: unknown;
 
   /**
    * 创建一个连接
    * @param jid 完整的账号，例如：user@domain.com
    * @param password 密码
    * @param options 自定义配置，一般不需要配置，包括：
-   *    - service为连接的url，不要前缀
+   *    - host为连接的url，不要前缀
    *    - protocol为连接协议，xmpp仅node环境可用，目前仅实现了ws
    *    - tls为是否启用tls，在本地调试的时候您可能不需要，默认为true
    */
@@ -118,8 +120,8 @@ export class Connection extends EventEmitter {
     if (options?.protocol) {
       this.protocol = options.protocol;
     }
-    if (options?.address) {
-      this.address = options.address;
+    if (options?.host) {
+      this.address = options.host;
     } else {
       console.warn("未指定service，将尝试从域名获取");
     }
@@ -135,9 +137,9 @@ export class Connection extends EventEmitter {
       this.tls = options.tls;
     }
     // 组合url
-    if (this.address && this.protocol) {
+    if (this.host && this.protocol) {
       const prefix = this.tls ? `${this.protocol}s` : this.protocol;
-      this.url = `${prefix}://${this.address}`;
+      this.url = `${prefix}://${this.host}`;
       if (this.port) {
         this.url += `:${this.port}`;
       }
@@ -150,39 +152,43 @@ export class Connection extends EventEmitter {
    * 注册内置插件
    * @param name 内置插件名称
    */
-  registerPlugin<T extends keyof typeof plugins>(
-    name: T
-  ): void;
+  registerPlugin<T extends keyof typeof plugins>(name: T): void;
   /**
    * 注册插件，如果是本库实现的插件，命名都是XEP0000格式，直接传入名称即可
    * 如果是自定义插件，需要传入插件构造函数
    * @param name 插件名称
    * @param fun 插件构造函数
    */
-  registerPlugin(name: string, fun?: PluginConstructor) {
+  registerPlugin(name: string, func?: PluginConstructor) {
     // 在自身上注册插件
     if (name in plugins) {
       console.log(`注册插件 ${name}`);
-      fun = plugins[name as keyof typeof plugins];
-      this[name] = new fun(this);
-    } else if (fun !== void 0) {
-      this[name] = new fun(this);
+      func = plugins[name as keyof typeof plugins];
+      this.pendingPlugins.set(name, func);
+    } else if (func !== void 0) {
+      this.pendingPlugins.set(name, func);
     } else {
       throw new Error(`未找到插件 ${name}`);
     }
-    this[name].init();
   }
 
+  // 在连接前调用
+  private initPlugins() {
+    // 按顺序初始化所有插件
+    for (const [name, func] of this.pendingPlugins) {
+      this[name] = new func(this);
+    }
+    for (const [name, _] of this.pendingPlugins) {
+      (this[name] as InstanceType<PluginConstructor>).init();
+    }
+  }
   /**
    * 注册stanza处理插件
-   * @param tagName 根元素名称，可选值有message, iq, presence, others
+   * @param NS 命名空间
    * @param handler 处理函数
    */
-  registerStanzaPlugin<K extends keyof StanzaHandlerMap>(
-    tagName: K,
-    handler: StanzaHandlerMap[K]
-  ) {
-    this.stanzaPlugins[tagName].push(handler);
+  registerStanzaPlugin(NS: string, handler: (stanza: Element) => Record<string, unknown>) {
+    this.stanzaPlugins.set(NS, handler);
   }
 
   /**
@@ -197,14 +203,16 @@ export class Connection extends EventEmitter {
     eventName: keyof SocketEventMap,
     option: {
       tagName: K;
-      matcher:  EventHandlerMap[K];
+      matcher: EventHandlerMap[K];
     }
   ) {
     const { tagName, matcher } = option;
-    this.eventPlugins[tagName].push({eventName, matcher});
+    this.eventPlugins[tagName].push({ eventName, matcher });
   }
 
   connect() {
+    // 初始化插件
+    this.initPlugins();
     if (this.protocol === "ws") {
       this.socket = new WebSocketClient(this.jid, this.password);
     } else if (this.protocol === "http") {
@@ -249,20 +257,30 @@ export class Connection extends EventEmitter {
   }
 
   disconnect() {
+    // 清除所有监听器
+    this.removeAllListeners();
     this.socket?.disconnect();
+    // 清除所有插件
+    for (const [name, _] of this.pendingPlugins) {
+      delete this[name];
+    }
+    // 清除所有事件插件
+    for (const [_, plugins] of Object.entries(this.eventPlugins)) {
+      plugins.length = 0;
+    }
+    // 清除所有stanza插件
+    this.stanzaPlugins.clear();
   }
 
   onMessage(message: string) {
     console.log("receive", message);
-    const stanza = domParser.parseFromString(
-      message,
-      "text/xml"
-    ).documentElement!;
+    const stanza = domParser.parseFromString(message, "text/xml")
+      .documentElement!;
 
     this.emit("stanza", stanza);
 
     const tagName = ["message", "iq", "presence"].includes(stanza.tagName)
-      ? stanza.tagName as keyof StanzaHandlerMap
+      ? (stanza.tagName as keyof StanzaHandlerMap)
       : "others";
     const stanzaInstance = this.stanzaInstanceFactory(stanza);
     this.emit(tagName, stanzaInstance);
@@ -277,9 +295,6 @@ export class Connection extends EventEmitter {
 
     if (tagName === "message") {
       stanzaInstance = new Message(stanza, this);
-      for (const handler of this.stanzaPlugins[tagName]) {
-        handler(stanzaInstance);
-      }
       for (const eventPlugin of this.eventPlugins[tagName]) {
         if (eventPlugin.matcher(stanzaInstance)) {
           this.emit(eventPlugin.eventName, stanzaInstance);
@@ -287,22 +302,39 @@ export class Connection extends EventEmitter {
       }
     } else if (tagName === "iq") {
       stanzaInstance = new Iq(stanza, this);
-      for (const handler of this.stanzaPlugins[tagName]) {
-        handler(stanzaInstance);
-      }
     } else if (tagName === "presence") {
       stanzaInstance = new Presence(stanza, this);
-      for (const handler of this.stanzaPlugins[tagName]) {
-        handler(stanzaInstance);
-      }
     } else {
       stanzaInstance = new StanzaBase(stanza, this);
-      for (const handler of this.stanzaPlugins[tagName]) {
-        handler(stanzaInstance);
-      }
     }
 
+    this.traverseAndTransform(stanzaInstance);
     return stanzaInstance;
+  }
+
+  /**
+   * 把stanza中的所有子节点传递给插件处理成对象
+   * 会直接修改原对象
+   * @param obj stanza对象
+   * @returns 返回obj
+   */
+  private traverseAndTransform(obj: Record<string, unknown>) {
+    // HACK：使用 instanceof Element 我无法做到同时兼容浏览器和node环境
+    for (const [key, value] of Object.entries(obj)) {
+      if (!value || typeof value !== "object" || Array.isArray(obj)) continue;
+      // console.log(key);
+      if (this.stanzaPlugins.has((value as Element).namespaceURI ?? "")) {
+        const handler = this.stanzaPlugins.get(
+          (value as Element).namespaceURI!
+        )!;
+        const transformed = handler(value as Element);
+        this.traverseAndTransform(transformed);
+        // 重新赋值
+        delete obj[key];
+        Object.assign(obj, transformed)
+      }
+    }
+    return obj;
   }
 
   send(stanza: Element) {
@@ -432,6 +464,18 @@ export class Connection extends EventEmitter {
     return this.sendAsync(iq);
   }
 
+  getRoster() {
+    return this.RFC6121!.getRoster();
+  }
+
+  setRoster(jid: string, name?: string, group?: string) {
+    return this.RFC6121!.setRoster(jid, name, group);
+  }
+
+  removeRoster(jid: string) {
+    return this.RFC6121!.removeRoster(jid);
+  }
+  
   /**
    * 一次性消息节监听处理器
    * @param id 消息id
@@ -492,6 +536,7 @@ export class Connection extends EventEmitter {
 }
 
 import { plugins } from "../lib/plugins/index";
+import { getRandomValues } from "crypto";
 
 type PluginRegistry = {
   [K in keyof typeof plugins]?: InstanceType<(typeof plugins)[K]>;

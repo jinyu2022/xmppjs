@@ -1,13 +1,16 @@
 import { Form } from './form'
 import type { Plugin } from '../types';
+import type { Connection } from '../../connection';
 export class XEP0004 extends Form implements Plugin {
-    /** 你不应该使用这个 */
-    connection = null
-    constructor(_connection: any) {
+    readonly name = 'XEP-0004: Data Forms'
+    readonly dependencies = [] as const
+    constructor(_connection: Connection) {
         super();
     }
 
-    init() { return }
+    init() { 
+        return
+    }
 }
 
 export default XEP0004

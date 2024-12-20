@@ -1,7 +1,8 @@
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
-import { domParser, xmlSerializer, WebSocket } from "./shims";
+import { domParser, xmlSerializer, WS } from "./shims";
 import { TimeoutError } from "./errors";
+import type WebSocket from "ws";
 import {
   generateSecureNonce,
   scramParseChallenge,
@@ -45,8 +46,7 @@ enum Status {
 // 定义所有可能的事件参数类型
 interface SocketEventMap {
   connect: void;
-  disconnect: CloseEvent;
-  data: Buffer | string;
+  disconnect: WebSocket.CloseEvent;
   error: Error;
   authenticated: void;
   "stream:start": void;
@@ -95,7 +95,7 @@ export class WebSocketClient extends EventEmitter {
 
   connect(url: string) {
     this.url = url;
-    this.ws = new WebSocket(url, "xmpp");
+    this.ws = new WS(url, "xmpp");
     console.log("connecting", url);
     this.ws.onopen = (ev) => this.onOpen(ev);
     this.ws.onclose = (ev) => this.onClose(ev);
@@ -118,7 +118,8 @@ export class WebSocketClient extends EventEmitter {
 
     if (!this.ws) {
       throw new Error("未连接到服务器");
-    } else if (this.ws.readyState !== WebSocket.OPEN) {
+      // 1 表示连接已经建立
+    } else if (this.ws.readyState !== 1) {
       console.log("send", data);
       throw new Error("连接未打开");
     } else if (xml.getAttribute("id") === null) {
@@ -146,10 +147,8 @@ export class WebSocketClient extends EventEmitter {
       const id = xml.getAttribute("id");
 
       const onResponse = (response: string) => {
-        const resElement = domParser.parseFromString(
-          response,
-          "text/xml"
-        ).documentElement;
+        const resElement = domParser.parseFromString(response, "text/xml")
+          .documentElement!;
         const responseId = resElement.getAttribute("id");
         if (responseId && responseId === id) {
           // 收到匹配的响应，解除监听并解析 Promise
@@ -172,7 +171,7 @@ export class WebSocketClient extends EventEmitter {
     });
   }
 
-  onOpen(_ev: Event) {
+  onOpen(_ev: WebSocket.Event) {
     console.log("open");
     // 发送xmpp流的xml
     // 获取当前的域
@@ -183,26 +182,26 @@ export class WebSocketClient extends EventEmitter {
     this.status = Status.STREAM_START;
   }
 
-  onClose(ev: CloseEvent) {
+  onClose(ev: WebSocket.CloseEvent) {
     this.status = Status.DISCONNECTED;
     this.emit("disconnect", ev);
     console.log("ws连接close", ev.code, ev.reason);
   }
 
-  onMessage(ev: MessageEvent) {
+  onMessage(ev: WebSocket.MessageEvent) {
     // console.log("message", ev.data);
     if (this.status < Status.SESSIONSTART) {
       // 如果还没有开始会话，就准备会话
-      this.prepareSession(ev.data);
-      
-      this.emit("net:message", ev.data);
+      this.prepareSession(ev.data as string);
+
+      this.emit("net:message", ev.data as string);
     } else {
       // 如果已经开始会话，就直接触发事件
-      this.emit("net:message", ev.data);
+      this.emit("net:message", ev.data as string);
     }
   }
 
-  onError(ev: Event) {
+  onError(ev: WebSocket.ErrorEvent) {
     console.error("error", ev);
   }
 
@@ -221,7 +220,7 @@ export class WebSocketClient extends EventEmitter {
         data.includes("http://etherx.jabber.org/streams")
       ) {
         // 开始认证
-        const xml = domParser.parseFromString(data, "text/xml").documentElement;
+        const xml = domParser.parseFromString(data, "text/xml").documentElement!;
         // 获取所有的 mechanism 元素
         const mechanisms = xml.getElementsByTagName("mechanism");
 
@@ -257,7 +256,7 @@ export class WebSocketClient extends EventEmitter {
         const challenge = domParser.parseFromString(
           data,
           "text/xml"
-        ).documentElement;
+        ).documentElement!;
         const serverFirstMessage = challenge.textContent;
         // 解析base64成字符串
         const serverFirstMessageStr = Buffer.from(
@@ -309,7 +308,7 @@ export class WebSocketClient extends EventEmitter {
         const xmlElement = domParser.parseFromString(
           xml,
           "text/xml"
-        ).documentElement;
+        ).documentElement!;
         this.sendAsync(xmlElement).then((response) => {
           // 获取jid标签的connentText
           const jid = response.getElementsByTagName("jid")[0].textContent;
@@ -319,7 +318,7 @@ export class WebSocketClient extends EventEmitter {
             this.emit("session:start");
             this.status = Status.SESSIONSTART;
             // 发送在线状态，开始接受消息
-          }else{
+          } else {
             console.error("绑定失败", jid);
           }
         });
@@ -403,6 +402,10 @@ export class WebSocketClient extends EventEmitter {
     this.send(closeXML);
     // 关闭ws连接
     this.close();
+    this.status = Status.DISCONNECTED;
+    // 关闭事件
+    this.removeAllListeners();
+    this.ws = null;
     console.log("关闭连接");
   }
 }
