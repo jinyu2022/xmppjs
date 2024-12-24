@@ -85,13 +85,11 @@ export class MUC {
    *   - seconds 最大秒数
    *   - since 从某个时间开始
    *   - password 房间密码
-   * @param timeout 超时时间，默认为5分钟
    */
   static createJoinPres(
     room: string | JID,
     nick: string,
-    options?: JoinOptions,
-    timeout = 300_0000
+    options?: JoinOptions
   ) {
     if (typeof room === "string") room = new JID(room);
     const roomJID = `${room.bare}/${nick}`;
@@ -158,7 +156,7 @@ export class MUC {
     return pres.documentElement!;
   }
 
-  mediatedinvite(room: string | JID, recipient: string | JID, reason = "") {
+  static mediatedinvite(room: string | JID, recipient: string | JID, reason = "") {
     const message = implementation.createDocument(
       "jabber:client",
       "message",

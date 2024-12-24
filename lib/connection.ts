@@ -55,6 +55,11 @@ export interface Connection extends EventEmitter {
     listener: (arg: SocketEventMap[E]) => void
   ): this;
 
+  once<E extends keyof SocketEventMap>(
+    event: E,
+    listener: (arg: SocketEventMap[E]) => void
+  ): this;
+
   emit<E extends keyof SocketEventMap>(
     event: E,
     arg?: SocketEventMap[E]
@@ -83,6 +88,7 @@ export class Connection extends EventEmitter {
   tls = true;
   /* 当前的连接 */
   socket: WebSocketClient | null = null;
+  /** 插件列表，键是插件名 */
   private readonly pendingPlugins = new Map<string, PluginConstructor>();
 
   /** stanza处理插件，键是NS，值是函数 */
@@ -172,8 +178,23 @@ export class Connection extends EventEmitter {
     }
   }
 
-  // 在连接前调用
+  private checkAndRegisterDep(name: string) {
+    // 先检查依赖
+    const func: PluginConstructor = plugins[name as keyof typeof plugins];
+    for (const dep of func.dependencies ?? []) {
+      if (!this.pendingPlugins.has(dep)) {
+        console.warn(`${name} 需要 ${dep} 插件，现在自动注册`);
+        this.registerPlugin(dep);
+        this.checkAndRegisterDep(dep);
+      }
+    }
+  }
+  /** 注册插件 */
   private initPlugins() {
+    // 先检查依赖
+    for (const [name, _] of Array.from(this.pendingPlugins)) {
+      this.checkAndRegisterDep(name);
+    }
     // 按顺序初始化所有插件
     for (const [name, func] of this.pendingPlugins) {
       this[name] = new func(this);
@@ -182,12 +203,43 @@ export class Connection extends EventEmitter {
       (this[name] as InstanceType<PluginConstructor>).init();
     }
   }
+
+  /**
+   * 卸载插件，会自动卸载依赖于该插件的插件
+   * @param name 插件名称，XEP0000格式
+   */
+  deregisterPlugin(name: keyof typeof plugins) {
+    const plugin = this[name];
+    if (!plugin) return;
+    // 查找依赖于该插件的插件
+    for (const [n, p] of this.pendingPlugins) {
+      if (p.dependencies?.includes(name)) {
+        this.deregisterPlugin(n as keyof typeof plugins);
+      }
+    }
+    // 使用Proxy创建错误处理器
+    // HACK: 如果要卸载我不得不忽略readonly属性
+    // @ts-expect-error
+    this[name] = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error(`Plugin ${name} has been unregistered`);
+        },
+      }
+    );
+    // 从待处理插件列表中移除
+    this.pendingPlugins.delete(name);
+  }
   /**
    * 注册stanza处理插件
    * @param NS 命名空间
    * @param handler 处理函数
    */
-  registerStanzaPlugin(NS: string, handler: (stanza: Element) => Record<string, unknown>) {
+  registerStanzaPlugin(
+    NS: string,
+    handler: (stanza: Element) => Record<string, unknown>
+  ) {
     this.stanzaPlugins.set(NS, handler);
   }
 
@@ -234,7 +286,7 @@ export class Connection extends EventEmitter {
       });
       this.socket!.on("net:message", (message) => this.onMessage(message));
       // 协商流特性
-      this.socket!.on("session:start", () => {
+      this.socket!.once("binded", () => {
         this.socket?.send(
           '<presence xmlns="jabber:client"><show>dnd</show></presence>'
         );
@@ -331,7 +383,7 @@ export class Connection extends EventEmitter {
         this.traverseAndTransform(transformed);
         // 重新赋值
         delete obj[key];
-        Object.assign(obj, transformed)
+        Object.assign(obj, transformed);
       }
     }
     return obj;
@@ -475,7 +527,7 @@ export class Connection extends EventEmitter {
   removeRoster(jid: string) {
     return this.RFC6121!.removeRoster(jid);
   }
-  
+
   /**
    * 一次性消息节监听处理器
    * @param id 消息id
@@ -536,15 +588,10 @@ export class Connection extends EventEmitter {
 }
 
 import { plugins } from "../lib/plugins/index";
-import { getRandomValues } from "crypto";
+import type { PluginConstructor } from "./plugins/types";
 
 type PluginRegistry = {
   [K in keyof typeof plugins]?: InstanceType<(typeof plugins)[K]>;
-};
-
-/** 一个具有init方法的构造函数类型*/
-type PluginConstructor = new (connection: Connection) => {
-  init: () => void;
 };
 
 export default Connection;

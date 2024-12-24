@@ -9,7 +9,7 @@ import type { MUCItem, MUCUserPres } from "./typing";
 
 export class XEP0045 extends MUC implements Plugin {
     readonly name = "XEP0045";
-    readonly dependencies = ["XEP0030"] as const;
+    static readonly dependencies = ["XEP0030"] as const;
     readonly connection: Connection;
 
     /** 存储已加入的房间信息，键是room jid */
@@ -20,14 +20,6 @@ export class XEP0045 extends MUC implements Plugin {
     }
 
     init() {
-        // 检查依赖
-        for (const dep of this.dependencies) {
-            if (!this.connection[dep]) {
-                console.warn(`MUC 需要 ${dep} 插件，现在自动注册`);
-                this.connection.registerPlugin(dep);
-            }
-        }
-
         this.connection.XEP0030!.addFeature(XEP0045.NS.BASE);
 
         this.connection.registerStanzaPlugin(

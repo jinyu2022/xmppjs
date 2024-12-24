@@ -27,8 +27,10 @@ enum Status {
   AUTHENTICATED = 6,
   /** 正在进行资源绑定 */
   BINDING = 7,
+  /** 资源绑定成功 */
+  BINDED = 8,
   /** 身份验证失败 */
-  AUTHFAIL = 8,
+  AUTHFAIL = 9,
   /** 会话已开始 */
   SESSIONSTART = 10,
   /** 正在重新连接 */
@@ -54,6 +56,7 @@ interface SocketEventMap {
   // stanza: { name: string; attrs: Record<string, string>; children: any[] };
   "net:message": string;
   "session:start": void;
+  "binded": void;
   [event: string | symbol]: unknown;
 }
 
@@ -315,9 +318,10 @@ export class WebSocketClient extends EventEmitter {
           if (jid === `${this.jid}${this.resource}`) {
             console.log("绑定成功", `${this.jid}${this.resource}`);
             // console.log()
-            this.emit("session:start");
-            this.status = Status.SESSIONSTART;
-            // 发送在线状态，开始接受消息
+            this.emit("binded");
+            this.status = Status.BINDED;
+            
+            // 发送在线状态，开始接受消息，由connection类完成
           } else {
             console.error("绑定失败", jid);
           }

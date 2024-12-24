@@ -12,9 +12,7 @@ interface Roster {
   subscription: subscription;
 }
 class RFC6121 implements Plugin {
-  name = "RFC6121";
-  description = "RFC6121: XMPP Instant Messaging and Presence";
-
+  name = "RFC6121: XMPP Instant Messaging and Presence";
   static readonly NS = "jabber:iq:roster" as const;
   readonly connection: Connection;
   constructor(connection: Connection) {

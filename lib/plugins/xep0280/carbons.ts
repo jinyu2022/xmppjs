@@ -1,53 +1,25 @@
-import type { Connection } from "../../connection";
-import { implementation, xmlSerializer } from "../../shims";
+import { implementation } from "../../shims";
 import { XMPPError } from "../../errors";
+import { Iq } from "@/stanza";
 export class Carbons {
   static readonly NS = "urn:xmpp:carbons:2";
-  connection: Connection;
-  constructor(connection: Connection) {
-    this.connection = connection;
-  }
 
-  createEnableIq() {
-    const iq = this.connection.createIq("set");
+  static createEnableIq() {
+    const iq = Iq.createIq("set").documentElement!;
     iq.appendChild(
       implementation.createDocument(Carbons.NS, "enable", null).documentElement!
     );
     return iq;
   }
 
-  enable() {
-    const iq = this.connection.createIq("set");
+  static createDisableIq() {
+    const iq = Iq.createIq("set").documentElement!;
     iq.appendChild(
-      implementation.createDocument(Carbons.NS, "enable", null).documentElement!
+      implementation.createDocument(Carbons.NS, "disable", null).documentElement!
     );
-    this.connection.sendAsync(iq).then((result) => {
-      if (result.getAttribute("type") === "result") {
-        console.log("enable 启动成功");
-      } else if (result.getAttribute("type") === "error") {
-        console.log("enable failed");
-      } else {
-        console.error("enable failed");
-      }
-    });
+    return iq;
   }
 
-  disable() {
-    const iq = this.connection.createIq("set");
-    iq.appendChild(
-      implementation.createDocument(Carbons.NS, "disable", null)
-        .documentElement!
-    );
-    this.connection.sendAsync(iq).then((result) => {
-      if (result.getAttribute("type") === "result") {
-        console.log("disable success");
-      } else if (result.getAttribute("type") === "error") {
-        console.log("disable failed");
-      } else {
-        console.error("disable failed");
-      }
-    });
-  }
 
   static parseCarbonEl(carbon: Element) {
     // 判断当前节点是否为 received/sent
