@@ -3,7 +3,7 @@ import type { Plugin } from '../types';
 import type { Connection } from '../../connection';
 export class XEP0004 extends Form implements Plugin {
     readonly name = 'XEP-0004: Data Forms'
-    readonly dependencies = [] as const
+    static readonly dependencies = [] as const
     constructor(_connection: Connection) {
         super();
     }

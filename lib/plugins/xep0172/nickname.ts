@@ -1,9 +1,10 @@
 import { implementation } from "@/shims";
-export class UserNick {
+import { PEP } from "../xep0163/pep";
+export class Nickname {
     static readonly NS = "http://jabber.org/protocol/nick" as const;
 
     static parseNickEl(nick: Element) {
-        if (nick.namespaceURI !== UserNick.NS) throw new Error("不是一个nick元素");
+        if (nick.namespaceURI !== Nickname.NS) throw new Error("不是一个nick元素");
         return {
             nick: nick.textContent,
         };
@@ -12,7 +13,7 @@ export class UserNick {
     static createNickSubscribe(to: string, nick: string) {
         const pres = implementation.createDocument("jabber:client", "presence", null);
         pres.documentElement!.setAttribute("to", to);
-        const nickEl = pres.createElementNS(UserNick.NS, "nick");
+        const nickEl = pres.createElementNS(Nickname.NS, "nick");
         nickEl.textContent = nick;
         pres.documentElement!.appendChild(nickEl);
         return pres.documentElement!;
@@ -25,11 +26,28 @@ export class UserNick {
         const body = msg.createElement('body');
         body.textContent = message;
         msg.documentElement!.appendChild(body);
-        const nickEl = msg.createElementNS(UserNick.NS, "nick");
+        const nickEl = msg.createElementNS(Nickname.NS, "nick");
         nickEl.textContent = nick;
         msg.documentElement!.appendChild(nickEl);
         return msg.documentElement
     }
 
-    //todo: 4.3昵称管理
+    /**
+     * 创建发布昵称的iq
+     * @nick 昵称
+     */
+    static createNickPublishIq(nick: string) {
+        const publishDoc = implementation.createDocument(null, "publish", null);
+        const publish = publishDoc.documentElement!;
+        publish.setAttribute("node", Nickname.NS);
+        const item = publishDoc.createElement("item");
+        const nickEl = publishDoc.createElementNS(Nickname.NS, "nick");
+        nickEl.textContent = nick;
+        item.appendChild(nickEl);
+        publish.appendChild(item);
+        return PEP.createPublishIq(publish);
+    }
+
+    //不打算支持回退到0060
+
 }

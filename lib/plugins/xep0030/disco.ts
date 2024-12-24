@@ -1,11 +1,11 @@
 import type { Connection } from "../../connection";
 import type { JID } from "../../JID";
 import { implementation } from "../../shims";
-interface Identity {
+export interface Identity {
   category: string;
   type: string;
-  name: string;
-  lang: string;
+  name?: string;
+  lang?: string;
 }
 interface Item {
   jid: string;
@@ -18,7 +18,7 @@ interface DiscoCache {
 }
 
 export class Disco {
-  readonly NS = {
+  static readonly NS = {
     DISCO_INFO: "http://jabber.org/protocol/disco#info",
     DISCO_ITEMS: "http://jabber.org/protocol/disco#items",
   } as const;
@@ -130,9 +130,9 @@ export class Disco {
    * @returns 响应的xml
    */
   async getDiscoInfo(to: string | JID, node?: string, cache = true) {
-    const iq = this.connection.createIq("get", to, this.NS.DISCO_INFO);
+    const iq = this.connection.createIq("get", to, Disco.NS.DISCO_INFO);
     if (node) {
-      iq.setAttributeNS(this.NS.DISCO_INFO, "node", node);
+      iq.setAttributeNS(Disco.NS.DISCO_INFO, "node", node);
     }
     if (cache) {
       const cache = this.infoCache.get(to.toString());
@@ -143,7 +143,7 @@ export class Disco {
     const response = await this.connection.sendIq(
       "get",
       to,
-      this.NS.DISCO_INFO
+      Disco.NS.DISCO_INFO
     );
     this.updateCache(to, response);
     return response;
@@ -157,9 +157,9 @@ export class Disco {
    * @returns 响应的xml
    */
   async getDiscoItems(to: string | JID, node?: string, cache = true) {
-    const iq = this.connection.createIq("get", to, this.NS.DISCO_ITEMS);
+    const iq = this.connection.createIq("get", to, Disco.NS.DISCO_ITEMS);
     if (node) {
-      iq.setAttributeNS(this.NS.DISCO_ITEMS, "node", node);
+      iq.setAttributeNS(Disco.NS.DISCO_ITEMS, "node", node);
     }
     if (cache) {
       const cache = this.itemsCache.get(to.toString());
@@ -170,7 +170,7 @@ export class Disco {
     const response = await this.connection.sendIq(
       "get",
       to,
-      this.NS.DISCO_ITEMS
+      Disco.NS.DISCO_ITEMS
     );
     this.updateCache(to, response);
     return response;
@@ -180,11 +180,11 @@ export class Disco {
     const discoInfo = this.connection.createIq(
       "result",
       to,
-      this.NS.DISCO_INFO
+      Disco.NS.DISCO_INFO
     );
     discoInfo.setAttribute("id", id);
     const query = discoInfo.getElementsByTagNameNS(
-      this.NS.DISCO_INFO,
+      Disco.NS.DISCO_INFO,
       "query"
     )[0];
     let identities = this.identities;
@@ -200,8 +200,12 @@ export class Disco {
       ).documentElement!;
       identityElement.setAttribute("category", identity.category);
       identityElement.setAttribute("type", identity.type);
-      identityElement.setAttribute("name", identity.name);
-      identityElement.setAttribute("xml:lang", identity.lang);
+      if (identity.name) {
+        identityElement.setAttribute("name", identity.name);
+      }
+      if (identity.lang) {
+        identityElement.setAttribute("xml:lang", identity.lang);
+      }
       query.appendChild(identityElement);
     }
     for (const feature of this.features) {
@@ -220,11 +224,11 @@ export class Disco {
     const discoItems = this.connection.createIq(
       "result",
       to,
-      this.NS.DISCO_ITEMS
+      Disco.NS.DISCO_ITEMS
     );
     discoItems.setAttribute("id", id);
     const query = discoItems.getElementsByTagNameNS(
-      this.NS.DISCO_ITEMS,
+      Disco.NS.DISCO_ITEMS,
       "query"
     )[0];
     let items = this.items;
@@ -234,11 +238,8 @@ export class Disco {
       items = items.filter((i) => i.node === queryNode);
     }
     for (const item of items) {
-      const itemElement = implementation.createDocument(
-        null,
-        "item",
-        null
-      ).documentElement!;
+      const itemElement = implementation.createDocument(null, "item", null)
+        .documentElement!;
       itemElement.setAttribute("jid", item.jid);
       if (item.name) {
         itemElement.setAttribute("name", item.name);
@@ -258,9 +259,9 @@ export class Disco {
    */
   updateCache(to: string | JID, xml: Element) {
     const queryNS = xml.getElementsByTagName("query")[0].namespaceURI;
-    if (queryNS === this.NS.DISCO_INFO) {
+    if (queryNS === Disco.NS.DISCO_INFO) {
       this.infoCache.set(to.toString(), { xml, timestamp: Date.now() });
-    } else if (queryNS === this.NS.DISCO_ITEMS) {
+    } else if (queryNS === Disco.NS.DISCO_ITEMS) {
       this.itemsCache.set(to.toString(), { xml, timestamp: Date.now() });
     } else {
       throw new Error("未知的查询类型");
@@ -277,5 +278,30 @@ export class Disco {
         this.infoCache.delete(key);
       });
     }
+  }
+
+  static parseDiscoInfo(xml: Element) {
+    let query: Element;
+    if (xml.namespaceURI !== Disco.NS.DISCO_INFO) {
+      query = xml.getElementsByTagNameNS(Disco.NS.DISCO_INFO, "query")[0];
+    } else {
+      query = xml;
+    }
+    const identities = Array.from(query.getElementsByTagName("identity")).map(
+      (identity) => {
+        return {
+          category: identity.getAttribute("category")!,
+          type: identity.getAttribute("type")!,
+          name: identity.getAttribute("name") ?? void 0,
+          lang: identity.getAttribute("xml:lang") ?? void 0,
+        };
+      }
+    );
+    const features = Array.from(query.getElementsByTagName("feature")).map(
+      (feature) => {
+        return feature.getAttribute("var")!;
+      }
+    );
+    return { identities, features };
   }
 }

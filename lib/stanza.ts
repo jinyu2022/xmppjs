@@ -1,7 +1,7 @@
 import type { Connection } from "./connection";
-import { xmlSerializer } from "./shims";
-
-type presShow = "away" | "chat" | "dnd" | "xa" ;
+import { xmlSerializer, implementation } from "./shims";
+import type { JID } from "./JID";
+type presShow = "away" | "chat" | "dnd" | "xa";
 export class StanzaBase {
   static readonly NS = "jabber:client" as const;
 
@@ -101,6 +101,21 @@ export class Iq extends StanzaBase {
       },
     };
   }
+
+  static createIq(
+    type: "get" | "set" | "result" | "error",
+    to?: JID | string,
+    queryNS?: string
+  ) {
+    const iq = implementation.createDocument("jabber:client", "iq", null);
+    iq.documentElement!.setAttribute("type", type);
+    if (to) iq.documentElement!.setAttribute("to", to.toString());
+    if (queryNS) {
+      const query = iq.createElementNS(queryNS, "query");
+      iq.documentElement!.appendChild(query);
+    }
+    return iq;
+  }
 }
 
 export class Message extends StanzaBase {
@@ -179,15 +194,16 @@ export class Presence extends StanzaBase {
     super(stanza, connection);
     this.type = stanza.getAttribute("type");
     this.show = stanza.getElementsByTagName("show")[0]?.textContent as presShow;
-    this.status = stanza.getElementsByTagName("status")[0]?.textContent
+    this.status = stanza.getElementsByTagName("status")[0]?.textContent;
   }
 
   static parsePresence(presence: Element) {
     const to = presence.getAttribute("to");
     const from = presence.getAttribute("from");
     const type = presence.getAttribute("type");
-    const show = presence.getElementsByTagName("show")[0]?.textContent as presShow;
-    const status = presence.getElementsByTagName("status")[0]?.textContent
+    const show = presence.getElementsByTagName("show")[0]
+      ?.textContent as presShow;
+    const status = presence.getElementsByTagName("status")[0]?.textContent;
     const childrens = Array.from(presence.childNodes).filter(
       (child) => child.nodeType === 1
     );
