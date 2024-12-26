@@ -1,49 +1,17 @@
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
-import { domParser, xmlSerializer, WS } from "./shims";
-import { TimeoutError } from "./errors";
+import { domParser, xmlSerializer, WS } from "../shims";
+import { TimeoutError } from "../errors";
+import { Status } from "./typing";
 import type WebSocket from "ws";
 import {
   generateSecureNonce,
   scramParseChallenge,
   scramDeriveKeys,
   scramClientProof,
-} from "./auth/scram";
-import { JID } from "./JID";
-enum Status {
-  /** 客户端未连接 */
-  DISCONNECTED = 0,
-  /** 正在连接到服务器 */
-  CONNECTING = 1,
-  /** 已成功连接到服务器 */
-  CONNECTED = 2,
-  /** 正在建立xmpp流 */
-  STREAM_START = 3,
-  /** xmpp流建立成功 */
-  STREAM_ESTABLISHED = 4,
-  /** 正在进行身份验证 */
-  AUTHENTICATING = 5,
-  /** 身份验证成功 */
-  AUTHENTICATED = 6,
-  /** 正在进行资源绑定 */
-  BINDING = 7,
-  /** 资源绑定成功 */
-  BINDED = 8,
-  /** 身份验证失败 */
-  AUTHFAIL = 9,
-  /** 会话已开始 */
-  SESSIONSTART = 10,
-  /** 正在重新连接 */
-  RECONNECTING = 11,
-  /** 已重新连接 */
-  DISCONNECTING = 40,
-  /** 发生错误 */
-  ERROR = 41,
-  /** 操作超时 */
-  TIMEOUT = 42,
-  /** 会话结束 */
-  SESSIONEND = 43,
-}
+} from "../auth/scram";
+import { JID } from "../JID";
+
 
 // 定义所有可能的事件参数类型
 interface SocketEventMap {
@@ -61,8 +29,13 @@ interface SocketEventMap {
 }
 
 // 扩展 EventEmitter 类型定义
-export interface WebSocketClient extends EventEmitter {
+export interface WSConnection extends EventEmitter {
   on<E extends keyof SocketEventMap>(
+    event: E,
+    listener: (arg: SocketEventMap[E]) => void
+  ): this;
+
+  once<E extends keyof SocketEventMap>(
     event: E,
     listener: (arg: SocketEventMap[E]) => void
   ): this;
@@ -81,7 +54,7 @@ export interface WebSocketClient extends EventEmitter {
   // on(event: string | symbol, listener: (...args: any[]) => void): this;
   // emit(event: string | symbol, ...args: any[]): boolean;
 }
-export class WebSocketClient extends EventEmitter {
+export class WSConnection extends EventEmitter {
   private readonly jid: JID;
   private readonly password: string;
   private ws: WebSocket | null = null;
@@ -125,8 +98,6 @@ export class WebSocketClient extends EventEmitter {
     } else if (this.ws.readyState !== 1) {
       console.log("send", data);
       throw new Error("连接未打开");
-    } else if (xml.getAttribute("id") === null) {
-      xml.setAttribute("id", uuidv4());
     }
     console.log("send", xmlSerializer.serializeToString(xml));
     this.ws.send(xmlSerializer.serializeToString(xml));
@@ -320,7 +291,7 @@ export class WebSocketClient extends EventEmitter {
             // console.log()
             this.emit("binded");
             this.status = Status.BINDED;
-            
+
             // 发送在线状态，开始接受消息，由connection类完成
           } else {
             console.error("绑定失败", jid);
@@ -414,4 +385,4 @@ export class WebSocketClient extends EventEmitter {
   }
 }
 
-export default WebSocketClient;
+export default WSConnection;
