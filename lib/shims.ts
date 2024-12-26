@@ -1,13 +1,17 @@
 // @ts-nocheck
 import type xmldom from '@xmldom/xmldom';
 import type { WebSocket as NodeWebSocket } from 'ws';
-function getDOMParser()  {
+function getDOMParser() {
     if (typeof window !== 'undefined' && window.DOMParser) {
         return new DOMParser();
     }
     try {
         const { DOMParser } = require('@xmldom/xmldom');
-        return new DOMParser();
+        return new DOMParser({
+            onError: (error) => {
+                console.error('解析错误:', error);
+            }
+        });
     } catch (e) {
         throw new Error('DOMParser不存在, 请在浏览器环境或者node环境安装xmldom');
     }

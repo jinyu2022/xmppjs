@@ -1,5 +1,3 @@
-// FIXME: 有大问题，加密问题
-
 /**
  * 对两个 ArrayBuffer 进行异或运算
  * @param x 第一个 ArrayBuffer
@@ -30,6 +28,13 @@ function stringToArrayBuf(str: string) {
   return bytes.buffer;
 }
 
+function base64ToArrayBuf(str: string) {
+  return Uint8Array.from(atob(str), (c) => c.charCodeAt(0))?.buffer;
+}
+
+export function arrayBufToBase64(buf: ArrayBuffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
 /**
  * 计算客户端证明 (client proof)
  * @param authMessage 认证消息
@@ -97,7 +102,7 @@ export function scramParseChallenge(challenge: string) {
         break;
 
       case "s": // salt
-        salt = Buffer.from(matches[2], "base64").buffer;
+        salt = base64ToArrayBuf(matches[2]);
         break;
 
       case "i": // iteration count
@@ -110,7 +115,6 @@ export function scramParseChallenge(challenge: string) {
 
       default: // optional extension
         // 非强制扩展，根据 RFC 5802 我们应该忽略它
-        console.debug(`忽略可选扩展: ${matches[1]}`);
         break;
     }
   }
@@ -223,15 +227,51 @@ export async function scramServerSign(
 export function generateSecureNonce(length: number = 16) {
   // 生成随机字节
   const array = new Uint8Array(length);
-  crypto.getRandomValues(array);
-
   // 转换为 base64 并移除特殊字符
-  return (
-    Buffer.from(array)
-      .toString("base64")
-      // 替换特殊字符
-      .replace(/[+\/=]/g, "")
-      // 截取指定长度
-      .slice(0, length)
-  );
+  return arrayBufToBase64(crypto.getRandomValues(array))
+}
+
+/** 应对挑战
+ * @param username 用户名
+ * @param password 密码
+ * @param challenge 挑战原文，不需要解码
+ * @param mechanism 机制
+ */
+export async function scramResponse(
+  password: string,
+  challenge: string,
+  clientFirstMessageBare: string,
+  mechanism: "SCRAM-SHA-1"
+) {
+  const mechanismToHash = {
+    "SCRAM-SHA-1": "SHA-1",
+    // "SCRAM-SHA-256": "SHA-256",
+  } as const;
+
+  const hashName = mechanismToHash[mechanism];
+  if (!hashName) throw new Error(`Unsupported mechanism: ${mechanism}`);
+  const decodedChallenge = atob(challenge);
+  const parsedChallenge = scramParseChallenge(decodedChallenge);
+  if (!parsedChallenge) throw new Error("无法解析 SCRAM 挑战");
+  
+  const { nonce, salt, iter } = parsedChallenge;
+  const clientFinalMessageBare = `c=biws,r=${nonce}`;
+  const authMessage = `${clientFirstMessageBare},${decodedChallenge},${clientFinalMessageBare}`;
+  
+  const hashLengthMap = {
+    "SHA-1": 160,
+    // "SHA-256": 256,
+    // "SHA-384": 384,
+    // "SHA-512": 512,
+  } as const;
+
+  const { ck, sk } = await scramDeriveKeys(password, salt, iter, hashName, hashLengthMap[hashName]);
+  const [clientProof, serverProof] = await Promise.all([
+    scramClientProof(authMessage, ck, hashName),
+    scramServerSign(authMessage, sk, hashName)
+  ]);
+  return {
+    clientResponse: btoa(`${clientFinalMessageBare},p=${arrayBufToBase64(clientProof)}`),
+    serverProof: arrayBufToBase64(serverProof)
+  }
 }

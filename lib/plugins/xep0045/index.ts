@@ -89,7 +89,7 @@ export class XEP0045 extends MUC implements Plugin {
         options?: JoinOptions,
         timeout = 300_0000
     ) {
-        const pres = XEP0045.createJoinPres(room, nick, options, timeout);
+        const pres = XEP0045.createJoinPres(room, nick, options);
         const res = await this.connection.sendAsync(pres, timeout);
         // 如果加入失败，服务端会返回一个错误的presence
         if (res.getAttribute("type") === "error") {

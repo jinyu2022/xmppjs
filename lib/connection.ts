@@ -1,5 +1,6 @@
 import { JID } from "./JID";
-import WebSocketClient from "./websocket";
+import WSConnection from "./transport/websocket";
+import XMPPConnection from "./transport/tcp";
 import type { Protocol, Options } from "./types";
 import { domParser, implementation } from "./shims";
 import { XMPPError, TimeoutError } from "./errors";
@@ -87,7 +88,7 @@ export class Connection extends EventEmitter {
   /** 是否启用tls，在本地调试的时候您可能不需要，默认为true */
   tls = true;
   /* 当前的连接 */
-  socket: WebSocketClient | null = null;
+  socket: WSConnection | XMPPConnection |null = null;
   /** 插件列表，键是插件名 */
   private readonly pendingPlugins = new Map<string, PluginConstructor>();
 
@@ -263,16 +264,18 @@ export class Connection extends EventEmitter {
   }
 
   connect() {
-    // 初始化插件
-    this.initPlugins();
     if (this.protocol === "ws") {
-      this.socket = new WebSocketClient(this.jid, this.password);
+      this.socket = new WSConnection(this.jid, this.password);
     } else if (this.protocol === "http") {
       throw new Error("暂不支持xbosh");
-    } else {
+    } else if (this.protocol === "xmpp") {
+      this.socket = new XMPPConnection(this.jid, this.password);
+    }else {
       throw new Error("未知的协议");
     }
-
+    
+    // 初始化插件
+    this.initPlugins();
     const connectHandler = () => {
       if (this.url) {
         console.log("尝试连接", this.url);

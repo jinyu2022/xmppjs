@@ -11,5 +11,17 @@ export class XEP0163 extends PEP implements Plugin {
     }
 
     init() {
+        this.connection.XEP0030!.getServerIdentities().then((identities) => {
+            if (
+                !identities.some(
+                    (identity) => identity.type === "pep" && identity.category === "pubsub"
+                )
+            ) {
+                this.connection.deregisterPlugin('XEP0163')
+                console.error("服务器不支持XEP-0163");
+            }
+        });
     }
 }
+
+export default XEP0163;
