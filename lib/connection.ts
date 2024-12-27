@@ -1,12 +1,16 @@
+import { EventEmitter } from "events";
+import { v4 as uuidv4 } from "uuid";
+import { domParser, implementation } from "./shims";
+import { XMPPError, TimeoutError } from "./errors";
 import { JID } from "./JID";
+import logger from "./log";
+import { Message, Iq, Presence, StanzaBase } from "./stanza";
 import WSConnection from "./transport/websocket";
 import XMPPConnection from "./transport/tcp";
 import type { Protocol, Options } from "./types";
-import { domParser, implementation } from "./shims";
-import { XMPPError, TimeoutError } from "./errors";
-import { Message, Iq, Presence, StanzaBase } from "./stanza";
-import { EventEmitter } from "events";
-import { v4 as uuidv4 } from "uuid";
+
+const log = logger.getLogger("connection");
+
 interface StanzaHandlerMap {
   message: (message: Message) => void;
   iq: (iq: Iq) => void;
@@ -88,7 +92,7 @@ export class Connection extends EventEmitter {
   /** 是否启用tls，在本地调试的时候您可能不需要，默认为true */
   tls = true;
   /* 当前的连接 */
-  socket: WSConnection | XMPPConnection |null = null;
+  socket: XMPPConnection | WSConnection | null = null;
   /** 插件列表，键是插件名 */
   private readonly pendingPlugins = new Map<string, PluginConstructor>();
 
@@ -130,12 +134,12 @@ export class Connection extends EventEmitter {
     if (options?.host) {
       this.address = options.host;
     } else {
-      console.warn("未指定service，将尝试从域名获取");
+      log.debug("未指定service，将尝试从域名获取");
     }
     if (options?.port) {
       this.port = options.port;
     } else {
-      console.warn("未指定port，将使用默认端口");
+      log.info("未指定port，将使用默认端口");
     }
     if (options?.path) {
       this.path = options.path;
@@ -169,7 +173,7 @@ export class Connection extends EventEmitter {
   registerPlugin(name: string, func?: PluginConstructor) {
     // 在自身上注册插件
     if (name in plugins) {
-      console.log(`注册插件 ${name}`);
+      log.debug(`注册插件 ${name}`);
       func = plugins[name as keyof typeof plugins];
       this.pendingPlugins.set(name, func);
     } else if (func !== void 0) {
@@ -184,7 +188,7 @@ export class Connection extends EventEmitter {
     const func: PluginConstructor = plugins[name as keyof typeof plugins];
     for (const dep of func.dependencies ?? []) {
       if (!this.pendingPlugins.has(dep)) {
-        console.warn(`${name} 需要 ${dep} 插件，现在自动注册`);
+        log.warn(`${name} 需要 ${dep} 插件，现在自动注册`);
         this.registerPlugin(dep);
         this.checkAndRegisterDep(dep);
       }
@@ -264,61 +268,57 @@ export class Connection extends EventEmitter {
   }
 
   connect() {
+    if (this.protocol !== "xmpp" && !this.url && !this.XEP0156) {
+      throw new Error("未指定 url");
+    } else if (this.protocol !== "xmpp" && !this.url && this.XEP0156) {
+      log.debug("存在插件，尝试使用XEP0156插件获取url");
+      this.XEP0156.init()?.then(() => {
+        this.socket = this.createSocket() as WSConnection;
+        // 初始化插件
+        this.initPlugins();
+        this.socket.connect(this.url!);
+        this.setupSocketEvents();
+      });
+    } else {
+      this.socket = this.createSocket() as XMPPConnection;
+      this.initPlugins();
+      this.socket.connect();
+      this.setupSocketEvents();
+    }
+  }
+  private createSocket() {
     if (this.protocol === "ws") {
-      this.socket = new WSConnection(this.jid, this.password);
+      return new WSConnection(this.jid, this.password);
     } else if (this.protocol === "http") {
       throw new Error("暂不支持xbosh");
     } else if (this.protocol === "xmpp") {
-      this.socket = new XMPPConnection(this.jid, this.password);
-    }else {
+      log.info("使用xmpp协议");
+      return new XMPPConnection(this.jid, this.password);
+    } else {
       throw new Error("未知的协议");
     }
-    
-    // 初始化插件
-    this.initPlugins();
-    const connectHandler = () => {
-      if (this.url) {
-        console.log("尝试连接", this.url);
-        this.socket!.connect(this.url);
-      } else {
-        throw new Error("未指定url");
-      }
-      this.socket!.on("close", () => {
-        console.log("连接已关闭");
-        this.socket = null;
-      });
-      this.socket!.on("net:message", (message) => this.onMessage(message));
-      // 协商流特性
-      this.socket!.once("binded", () => {
-        this.socket?.send(
-          '<presence xmlns="jabber:client"><show>dnd</show></presence>'
-        );
-        // 发送session:start事件
-        this.emit("session:start");
-        console.log("连接成功, 会话开始!");
-      });
-    };
-
-    if (!this.url) {
-      if (this.XEP0156) {
-        console.log("存在插件，尝试使用XEP0156插件获取url");
-        this.XEP0156.init()?.then(() => connectHandler());
-      } else {
-        throw new Error("未指定url");
-      }
-    } else {
-      connectHandler();
-    }
   }
-
+  private setupSocketEvents() {
+    if (!this.socket) return;
+    this.socket.once("close", () => {
+      log.debug("连接已关闭");
+      this.socket = null;
+    });
+    this.socket.on("net:message", (message) => this.onMessage(message));
+    this.socket.once("binded", () => {
+      this.socket?.send(
+        '<presence xmlns="jabber:client"><show>dnd</show></presence>'
+      );
+      this.emit("session:start");
+      log.debug("连接成功, 会话开始!");
+    });
+  }
   disconnect() {
     // 清除所有监听器
     this.removeAllListeners();
     this.socket?.disconnect();
     // 清除所有插件
-    for (const [name, _] of this.pendingPlugins) {
-      delete this[name];
-    }
+    this.pendingPlugins.clear();
     // 清除所有事件插件
     for (const [_, plugins] of Object.entries(this.eventPlugins)) {
       plugins.length = 0;
@@ -328,9 +328,14 @@ export class Connection extends EventEmitter {
   }
 
   onMessage(message: string) {
-    console.log("receive", message);
-    const stanza = domParser.parseFromString(message, "text/xml")
-      .documentElement!;
+    log.debug("receive", message);
+    let stanza: Element;
+    try{
+      stanza = domParser.parseFromString(message, "text/xml").documentElement!;
+    }catch(e){
+      log.error("解析失败", e, message);
+      return;
+    }
 
     this.emit("stanza", stanza);
 
@@ -377,7 +382,7 @@ export class Connection extends EventEmitter {
     // HACK：使用 instanceof Element 我无法做到同时兼容浏览器和node环境
     for (const [key, value] of Object.entries(obj)) {
       if (!value || typeof value !== "object" || Array.isArray(obj)) continue;
-      // console.log(key);
+      // log.debug(key);
       if (this.stanzaPlugins.has((value as Element).namespaceURI ?? "")) {
         const handler = this.stanzaPlugins.get(
           (value as Element).namespaceURI!
@@ -426,6 +431,7 @@ export class Connection extends EventEmitter {
    * @param stanza 要发送的stanza
    * @param timeout 超时时间，默认30秒
    * @returns 一个Promise对象，仅在发送失败时reject
+   * @throws 超时时抛出 TimeoutError
    */
   sendAsync(stanza: Element, timeout = 30000) {
     // 检查必须的流属性

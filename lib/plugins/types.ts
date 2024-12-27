@@ -11,6 +11,7 @@ interface PluginInstance {
 
 /** 构造函数接口（包含静态属性） */ 
 export interface PluginConstructor {
+    /** Connection 类只会自动加载依赖，而不会检查服务器的支持情况。*/
     readonly dependencies?: ReadonlyArray<keyof typeof plugins>;
     new (connection: Connection): PluginInstance;
 }

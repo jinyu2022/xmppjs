@@ -3,7 +3,9 @@ import { Connection } from "../../connection";
 import { Iq } from "@/stanza";
 import { Disco } from "./disco";
 import type { Identity } from "./disco";
+import logger from "@/log";
 
+const log = logger.getLogger("XEP0030");
 
 export class XEP0030 extends Disco implements Plugin {
   /** 服务器的功能 */
@@ -28,11 +30,11 @@ export class XEP0030 extends Disco implements Plugin {
         const query = Disco.parseDiscoInfo(res)
         identities = query.identities;
         features = query.features;
-        console.log("服务器身份特性获取成功");
+        log.debug("服务器身份特性获取成功");
       }catch {
         identities = []
         features = []
-        console.warn("服务器身份特性获取失败");
+        log.warn("服务器身份特性获取失败");
       }
       this.serverFeatures.clear();
       this.serverIdentities.length = 0;
@@ -65,7 +67,7 @@ export class XEP0030 extends Disco implements Plugin {
         const reply = this.createItemsResult(from, id, node);
         this.connection.send(reply);
       }else{
-        console.warn("无关disco查询", query);
+        log.warn("无关disco查询", query);
       }
     });
   }

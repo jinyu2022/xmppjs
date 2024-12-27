@@ -5,6 +5,9 @@ import { implementation } from "../../shims";
 import { XMPPError, TimeoutError } from "../../errors";
 import { Form, DataForm } from "../xep0004/form";
 import { MUCUserPres } from "./typing";
+import logger from "@/log";
+
+const log = logger.getLogger("MUC");
 export interface JoinOptions {
   maxchars?: number;
   maxstanzas?: number;
@@ -179,7 +182,7 @@ export class MUC {
     //     if (res.getAttribute("type") === "error") {
     //       throw new XMPPError(res, "邀请失败");
     //     } else {
-    //       console.error("返回奇怪的东西", res);
+    //       log.error("返回奇怪的东西", res);
     //     }
     //   })
     //   .catch((res) => {
@@ -368,7 +371,7 @@ export class MUC {
     // Q: 按照XML 架构，item元素可以有多个，但是我在例子中只看到一个
     const itemEl = xEl.getElementsByTagName("item")[0];
     if (xEl.getElementsByTagName("item").length > 1) {
-      console.error("item元素有多个", xEl);
+      log.error("item元素有多个", xEl);
     }
     const affiliation = itemEl.getAttribute("affiliation");
     const role = itemEl.getAttribute("role");

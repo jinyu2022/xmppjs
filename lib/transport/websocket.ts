@@ -11,7 +11,8 @@ import {
   scramClientProof,
 } from "../auth/scram";
 import { JID } from "../JID";
-
+import logger from "@/log";
+const log = logger.getLogger("WS");
 
 // 定义所有可能的事件参数类型
 interface SocketEventMap {
@@ -72,7 +73,7 @@ export class WSConnection extends EventEmitter {
   connect(url: string) {
     this.url = url;
     this.ws = new WS(url, "xmpp");
-    console.log("connecting", url);
+    log.debug("connecting", url);
     this.ws.onopen = (ev) => this.onOpen(ev);
     this.ws.onclose = (ev) => this.onClose(ev);
     this.ws.onmessage = (ev) => this.onMessage(ev);
@@ -96,10 +97,10 @@ export class WSConnection extends EventEmitter {
       throw new Error("未连接到服务器");
       // 1 表示连接已经建立
     } else if (this.ws.readyState !== 1) {
-      console.log("send", data);
+      log.debug("send", data);
       throw new Error("连接未打开");
     }
-    console.log("send", xmlSerializer.serializeToString(xml));
+    log.debug("send", xmlSerializer.serializeToString(xml));
     this.ws.send(xmlSerializer.serializeToString(xml));
   }
 
@@ -107,10 +108,11 @@ export class WSConnection extends EventEmitter {
    * @param xml 要发送的xml
    * @param timeout 超时时间，默认30s
    * @returns 返回一个promise，用于接受响应，仅在超时或者发送失败时reject
+   * @throws 超时时抛出 TimeoutError
    */
   sendAsync(xml: Element, timeout = 30000) {
     // 检查xml是否合法
-    console.log("id", xml.getAttribute("id"));
+    log.debug("id", xml.getAttribute("id"));
     if (!xml.getAttribute("id")) {
       throw new Error("没有id");
     }
@@ -146,7 +148,7 @@ export class WSConnection extends EventEmitter {
   }
 
   onOpen(_ev: WebSocket.Event) {
-    console.log("open");
+    log.debug("open");
     // 发送xmpp流的xml
     // 获取当前的域
     this.status = Status.CONNECTED;
@@ -159,11 +161,11 @@ export class WSConnection extends EventEmitter {
   onClose(ev: WebSocket.CloseEvent) {
     this.status = Status.DISCONNECTED;
     this.emit("disconnect", ev);
-    console.log("ws连接close", ev.code, ev.reason);
+    log.debug("ws连接close", ev.code, ev.reason);
   }
 
   onMessage(ev: WebSocket.MessageEvent) {
-    // console.log("message", ev.data);
+    // log.debug("message", ev.data);
     if (this.status < Status.SESSIONSTART) {
       // 如果还没有开始会话，就准备会话
       this.prepareSession(ev.data as string);
@@ -176,7 +178,7 @@ export class WSConnection extends EventEmitter {
   }
 
   onError(ev: WebSocket.ErrorEvent) {
-    console.error("error", ev);
+    log.error("error", ev);
   }
 
   private async prepareSession(data: string) {
@@ -215,9 +217,9 @@ export class WSConnection extends EventEmitter {
 
         // 选择PLAIN
         const selectedMechanism = "PLAIN";
-        console.log("selectedMechanism", selectedMechanism);
+        log.debug("selectedMechanism", selectedMechanism);
         const auth = btoa(`\0${this.jid.node}\0${this.password}`);
-        console.log("auth", auth);
+        log.debug("auth", auth);
         const authXML = `<auth mechanism="${selectedMechanism}" xmlns="urn:ietf:params:xml:ns:xmpp-sasl">${auth}</auth>`;
         this.send(authXML);
         this.status = Status.AUTHENTICATING;
@@ -225,7 +227,7 @@ export class WSConnection extends EventEmitter {
       return;
     }
     if (this.status === Status.AUTHENTICATING) {
-      // console.log("challenge", data)
+      // log.debug("challenge", data)
       if (data.includes("challenge")) {
         const challenge = domParser.parseFromString(
           data,
@@ -238,7 +240,7 @@ export class WSConnection extends EventEmitter {
           "base64"
         ).toString();
 
-        console.log("serverFirstMessage", serverFirstMessage);
+        log.debug("serverFirstMessage", serverFirstMessage);
         const parsed = scramParseChallenge(serverFirstMessageStr);
         if (!parsed) {
           throw new Error("解析失败");
@@ -254,7 +256,7 @@ export class WSConnection extends EventEmitter {
         );
         const clientFinalMessageBare = `c=biws,r=${nonce}`;
         const authMessage = `${this.clientFirstMessageBare},${serverFirstMessage},${clientFinalMessageBare}`;
-        console.log("authMessage", authMessage);
+        log.debug("authMessage", authMessage);
         const clientProof = await scramClientProof(authMessage, ck, "SHA-1");
         // 将 ArrayBuffer 转换为 base64 字符串
         const proofBase64 = Buffer.from(clientProof).toString("base64");
@@ -272,7 +274,7 @@ export class WSConnection extends EventEmitter {
         const openXML = `<open to="${domain}" version="1.0" xmlns="urn:ietf:params:xml:ns:xmpp-framing"/>`;
         this.send(openXML);
         // 发送流的结束标签
-        console.log(data);
+        log.debug(data);
       }
       return;
     }
@@ -287,14 +289,14 @@ export class WSConnection extends EventEmitter {
           // 获取jid标签的connentText
           const jid = response.getElementsByTagName("jid")[0].textContent;
           if (jid === `${this.jid}${this.resource}`) {
-            console.log("绑定成功", `${this.jid}${this.resource}`);
-            // console.log()
+            log.debug("绑定成功", `${this.jid}${this.resource}`);
+            // log.debug()
             this.emit("binded");
             this.status = Status.BINDED;
 
             // 发送在线状态，开始接受消息，由connection类完成
           } else {
-            console.error("绑定失败", jid);
+            log.error("绑定失败", jid);
           }
         });
       }
@@ -332,7 +334,7 @@ export class WSConnection extends EventEmitter {
   //         this.emit(eventName, response);
   //       }
   //     } catch (error) {
-  //       console.error("解析 XML 失败");
+  //       log.error("解析 XML 失败");
   //       this.ws!.removeEventListener("message", handler);
   //     }
   //   };
@@ -381,7 +383,7 @@ export class WSConnection extends EventEmitter {
     // 关闭事件
     this.removeAllListeners();
     this.ws = null;
-    console.log("关闭连接");
+    log.debug("关闭连接");
   }
 }
 

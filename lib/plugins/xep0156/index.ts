@@ -1,7 +1,8 @@
 import { Connection } from "../../connection";
 import { Plugin } from "../types";
 import { discoverAltXMPP } from "./discoverAltXMPP";
-
+import logger from "@/log";
+const log = logger.getLogger("XEP0156");
 class XEP0156 implements Plugin {
   readonly name = "XEP-0156: Discovering Alternative XMPP Connection Methods";
   readonly connection: Connection;
@@ -12,16 +13,16 @@ class XEP0156 implements Plugin {
   init() {
     // 如果已经有service，就不需要再初始化
     if (this.connection.url) {
-      console.log("已经有url，不需要再初始化");
+      log.debug("已经有url，不需要再初始化");
       return;
     }else if (!this.connection.socket){
-      console.log("未连接，不需要初始化");
+      log.debug("未连接，不需要初始化");
       return;
     }else if (!this.connection.protocol){
-      console.log("未指定协议，不需要再初始化");
+      log.debug("未指定协议，不需要再初始化");
       return;
     }else if (this.connection.protocol === "xmpp"){
-      console.log("xmpp协议，不需要再初始化");
+      log.debug("xmpp协议，不需要再初始化");
       return;
     }
     // 获取连接方法
@@ -50,7 +51,7 @@ class XEP0156 implements Plugin {
           this.connection.url = urlStr.replace("wss://", "ws://").replace("https://", "http://");
         }
       
-        console.log(`获取到连接方法: ${urlStr}`);
+        log.debug(`获取到连接方法: ${urlStr}`);
       })
       .catch((error) => {
         throw new Error(

@@ -1,17 +1,40 @@
 import { Iq } from "@/stanza";
-
+import { JID } from "@/JID";
 export interface PubsubEventItems {
     node: string;
     retracts?: string[];
-    item: Element;
+    item: PubsubEventItem
 }
-
+export interface PubsubEventItem {
+    id?: string;
+    publisher?: string;
+}
 export class Pubsub {
     static readonly NS = {
         BASE: "http://jabber.org/protocol/pubsub",
         EVENT: "http://jabber.org/protocol/pubsub#event",
     } as const;
-
+    /** 构造检索iq
+     * @param to 对方jid
+     * @param node 节点
+     * @param max 最大数量
+     * @param id item id
+     */
+    static createRetrieveItemsIq(to: string|JID, node: string, max?: number, id?: string) {
+        const iq = Iq.createIq("get", to);
+        const pubsub = iq.createElementNS(Pubsub.NS.BASE, "pubsub");
+        const items = iq.createElement("items")
+        items.setAttribute("node", node);
+        if (max) items.setAttribute("max_items", max.toString());
+        if (id) {
+            const item = iq.createElement("item");
+            item.setAttribute("id", id);
+            items.appendChild(item);
+        }
+        pubsub.appendChild(items);
+        iq.documentElement!.appendChild(pubsub);
+        return iq.documentElement!;
+    }
     static parseEventEl(eventEl: Element) {
         if (eventEl.namespaceURI !== Pubsub.NS.EVENT)
             throw new Error("不是一个event元素");
@@ -24,12 +47,19 @@ export class Pubsub {
                 retract.length > 0
                     ? Array.from(retract).map((retract) => retract.getAttribute("id")!)
                     : void 0;
-            const item = items.getElementsByTagName("item")[0];
+            const itemEL = items.getElementsByTagName("item")[0];
+            const itemId = itemEL?.getAttribute("id") ?? void 0;
+            const publisher = itemEL?.getAttribute("publisher") ?? void 0;
+            const children = itemEL?.childNodes[0];
             return {
                 event: {
                     node,
                     retracts,
-                    item,
+                    item:{
+                        id: itemId,
+                        publisher,
+                        [children.nodeName]: children,
+                    },
                 },
             };
         } else if (eventEl.getElementsByTagName("collection").length > 0) {
@@ -65,6 +95,10 @@ export class Pubsub {
         }
     }
 
+    /**
+     * 构造发布iq
+     * @param publish 发布元素
+     */
     static createPublishIq(publish: Element) {
         const iq = Iq.createIq("set");
         const pubsub = iq.createElementNS(Pubsub.NS.BASE, "pubsub");
@@ -77,11 +111,6 @@ export class Pubsub {
 declare module "@/stanza" {
     interface Message {
         /**XEP0060 */
-        event?:
-        {
-            node: string;
-            retracts: string[];
-            item: Element;
-        }
+        event?:PubsubEventItems
     }
 }

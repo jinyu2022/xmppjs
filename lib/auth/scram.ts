@@ -1,3 +1,5 @@
+import logger from "@/log";
+const log = logger.getLogger("scram");
 /**
  * 对两个 ArrayBuffer 进行异或运算
  * @param x 第一个 ArrayBuffer
@@ -110,7 +112,7 @@ export function scramParseChallenge(challenge: string) {
         break;
 
       case "m": // mandatory extension
-        console.warn("遇到未知的强制扩展，根据 RFC 5802 规范需要中止");
+        log.warn("遇到未知的强制扩展，根据 RFC 5802 规范需要中止");
         return null;
 
       default: // optional extension
@@ -121,17 +123,17 @@ export function scramParseChallenge(challenge: string) {
 
   // 验证必要字段
   if (!nonce) {
-    console.warn("服务器未提供 nonce");
+    log.warn("服务器未提供 nonce");
     return null;
   }
 
   if (!salt) {
-    console.warn("服务器未提供有效的盐值");
+    log.warn("服务器未提供有效的盐值");
     return null;
   }
   // 考虑迭代次数少于 4096 不安全，如 RFC 5802 所建议
   if (!iter || iter < 4096) {
-    console.warn(`迭代次数 ${iter} 小于安全最小值 4096`);
+    log.warn(`迭代次数 ${iter} 小于安全最小值 4096`);
     return null;
   }
 

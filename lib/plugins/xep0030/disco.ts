@@ -100,9 +100,10 @@ export class Disco {
   /**
    * 添加一个项目
    * @param jid 项目的JID
+   * @param node 项目的节点
    * @param name 项目的显示名称
    */
-  addItem(jid: string, name?: string, node?: string) {
+  addItem(jid: string, node?: string, name?: string) {
     if (
       this.items.some(
         (i) => i.jid === jid && i.name === name && i.node === node

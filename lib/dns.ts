@@ -1,6 +1,8 @@
 import dns from 'dns/promises'; // 使用 promise 版本的 dns 模块
 import type { SrvRecord } from 'dns'; // 导入 SrvRecord 类型
+import logger from '@/log'; // 导入日志模块
 
+const log = logger.getLogger('dns');
 export interface EndpointInfo {
     host: string;
     port: number;
@@ -35,7 +37,7 @@ export async function resolveXMPPSrv(domain: string, tls: boolean): Promise<Endp
             port: record.port
         }));
     } catch (error) {
-        console.error(`Error resolving SRV records for ${domain}:`, error);
+        log.error(`Error resolving SRV records for ${domain}:`, error);
         throw error; // 重新抛出错误，让调用者处理
     }
 }

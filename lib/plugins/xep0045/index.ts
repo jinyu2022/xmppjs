@@ -6,6 +6,8 @@ import { XEP0004 } from "../xep0004";
 import { JID } from "@/JID";
 import type { DataForm, Field } from "../xep0004/form";
 import type { MUCItem, MUCUserPres } from "./typing";
+import logger from "@/log";
+const log = logger.getLogger("XEP0045");
 
 export class XEP0045 extends MUC implements Plugin {
     readonly name = "XEP0045";
@@ -96,9 +98,9 @@ export class XEP0045 extends MUC implements Plugin {
             throw new XMPPError(res, "加入房间失败");
         } else if (res.getAttribute("type") === null) {
             // 如果没有返回类型，说明加入成功
-            console.log("加入房间成功");
+            log.debug("加入房间成功");
         } else {
-            console.error("未知类型", res);
+            log.error("未知类型", res);
         }
         return res;
     }
@@ -107,7 +109,7 @@ export class XEP0045 extends MUC implements Plugin {
         const pres = XEP0045.createLeavePres(to, reason);
         const res = await this.connection.sendAsync(pres);
         if (res.getAttribute("type") === "unavailable") {
-            console.log("离开房间成功");
+            log.debug("离开房间成功");
         } else if (res.getAttribute("type") === "error") {
             throw new XMPPError(res, "离开房间失败");
         }
@@ -144,7 +146,7 @@ export class XEP0045 extends MUC implements Plugin {
                     if (hasSuccess) {
                         clearTimeout(timeoutId);
                         this.connection.off("presence", handler);
-                        console.log("设置昵称成功");
+                        log.debug("设置昵称成功");
                         resolve(stanza);
                     }
                 }
@@ -175,7 +177,7 @@ export class XEP0045 extends MUC implements Plugin {
         if (res.getAttribute("type") === "error") {
             throw new XMPPError(res, "设置主题失败");
         } else if (res.getAttribute("type") === "groupchat") {
-            console.log("设置主题成功");
+            log.debug("设置主题成功");
         }
     }
 
@@ -191,7 +193,7 @@ export class XEP0045 extends MUC implements Plugin {
             if (res.getAttribute("type") === "error") {
                 throw new XMPPError(res, "踢人失败");
             } else if (res.getAttribute("type") === "result") {
-                console.log("踢人成功");
+                log.debug("踢人成功");
             }
         });
     }
@@ -202,7 +204,7 @@ export class XEP0045 extends MUC implements Plugin {
             if (res.getAttribute("type") === "error") {
                 throw new XMPPError(res, "禁言失败");
             } else if (res.getAttribute("type") === "result") {
-                console.log("禁言成功");
+                log.debug("禁言成功");
             }
         });
     }
@@ -265,7 +267,7 @@ export class XEP0045 extends MUC implements Plugin {
         }
         const res = await this.setRoomConfig(room, form);
         if (res.getAttribute("type") === "result") {
-            console.log("创建房间成功");
+            log.debug("创建房间成功");
         } else if (res.getAttribute("type") === "error") {
             throw new XMPPError(res, "创建房间失败");
         } else {
@@ -305,7 +307,7 @@ export class XEP0045 extends MUC implements Plugin {
         }
         const res = await this.setRoomConfig(room, form);
         if (res.getAttribute("type") === "result") {
-            console.log("创建房间成功");
+            log.debug("创建房间成功");
         } else if (res.getAttribute("type") === "error") {
             throw new XMPPError(res, "创建房间失败");
         } else {
