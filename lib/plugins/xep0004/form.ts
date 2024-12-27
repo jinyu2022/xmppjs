@@ -53,7 +53,6 @@ export class Form {
      * @returns 解析后的对象，键为form，值为DataForm对象
      */
     static parseFormEl(form: Element): { form: DataForm; } {
-        // console.log(form);
         if (form.namespaceURI !== Form.NS) throw new Error("不是一个data form");
         const type = form.getAttribute("type") as FormType;
         const title = form.getElementsByTagName("title")[0]?.textContent ?? void 0;

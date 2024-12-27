@@ -1,18 +1,28 @@
+import log from 'loglevel';
+type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
-enum LogLevel {
-  DEBUG = 0,
-  INFO = 1,
-  WARN = 2,
-  ERROR = 3,
+// 保存原始的 methodFactory
+const originalMethodFactory = log.methodFactory;
+
+function customMethodFactory(methodName: LogLevel, logLevel: log.LogLevelNumbers, loggerName: string|symbol) {
+  // 调用原始的 methodFactory 获取日志方法
+  const originalMethod = originalMethodFactory(methodName, logLevel, loggerName);
+
+  return function (...args: any[]): void {
+    const now = new Date();
+    const timestamp = now.toLocaleTimeString();
+    const levelPrefix = `[${methodName.toUpperCase()}]`;
+    const namePrefix = loggerName ? `[${String(loggerName)}]` : '';
+    const formattedArgs = [`${timestamp} ${levelPrefix}${namePrefix}`, ...args];
+
+    // 只有当日志级别允许时才调用原始的日志方法
+    if (log.getLevel() <= logLevel) {
+      originalMethod(...formattedArgs);
+    }
+  };
 }
 
-class Log {
-  private level: string;
-  constructor(level: string) {
-    this.level = level;
-  }
-   debug() {
-    if (this.level === 'debug') {
-      console.log(...arguments);
-    }}
-}
+log.methodFactory = customMethodFactory;
+
+const logger = log;
+export default logger;

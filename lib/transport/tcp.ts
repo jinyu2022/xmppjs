@@ -7,7 +7,8 @@ import { Status } from "./typing";
 import { EventEmitter } from "events";
 import { JID } from "../JID";
 import { scramResponse, generateSecureNonce } from "../auth/scram";
-
+import logger from "@/log";
+const log = logger.getLogger("tcp");
 interface SaslData {
     mechanism?: "PLAIN" | "SCRAM-SHA-1";
     clientFirstMessageBare?: string;
@@ -80,7 +81,7 @@ export class XMPPConnection extends EventEmitter {
     connect() {
         resolveXMPPSrv(this.domain, this.tls).then((endpoints) => {
             if (!endpoints.length) throw new Error("未找到可用的服务器端点");
-            console.log("endpoints", endpoints);
+            log.debug("endpoints", endpoints);
             this.endpoints = endpoints;
             for (const endpoint of this.endpoints) {
                 try {
@@ -92,7 +93,7 @@ export class XMPPConnection extends EventEmitter {
                     this.setupSocketListeners();
                     break;
                 } catch (error) {
-                    console.error(
+                    log.error(
                         `连接到 ${endpoint.host}:${endpoint.port} 失败:`,
                         error
                     );
@@ -119,7 +120,7 @@ export class XMPPConnection extends EventEmitter {
      * 创建TLS加密连接
      */
     private createSecureConnection(endpoint: EndpointInfo): void {
-        console.log("创建TLS连接");
+        log.debug("创建TLS连接");
         this.socket = tlsConnect({
             host: endpoint.host,
             port: endpoint.port,
@@ -146,23 +147,26 @@ export class XMPPConnection extends EventEmitter {
 
         this.socket!.on("error", (error) => {
             this.emit("error", error);
+            // 应该立刻关闭当前连接，并尝试重连
         });
 
         this.socket!.on("close", () => {
             this.status = Status.DISCONNECTED;
             this.emit("close");
-            this.handleReconnect();
+            // this.handleReconnect();
         });
     }
 
     private onData(data: string) {
-        console.log("接收", data);
+        log.trace("接收", data);
         if (this.status < Status.AUTHENTICATED) {
             this.authenticateUser(data);
-        } else if (this.status < Status.BINDED) {
-            // TIP: 一定要先发送事件，避免监听到<stream:features>，xmldom无法解析
-            this.emit("net:message", data);
+        } else if (this.status < Status.BINDING) {
             this.bindResource(data);
+        // TIP: 一定要先发送事件，避免监听到<stream:features>，xmldom无法解析
+        // }
+        // else if (this.status < Status.BINDED){
+        //     this.emit("net:message", data);
         }else {
             this.emit("net:message", data);
         }
@@ -193,7 +197,7 @@ export class XMPPConnection extends EventEmitter {
         if (typeof data !== "string") {
             data = xmlSerializer.serializeToString(data);
         }
-        console.log("发送", data);
+        log.trace("发送", data);
         return this.socket?.write(data) ?? false;
     }
 
@@ -215,8 +219,8 @@ export class XMPPConnection extends EventEmitter {
                 // try{
                 //     domParser.parseFromString(response, "text/xml");
                 // } catch (error) {
-                //     console.error("解析失败", response);
-                //     console.error("发送的内容", data);
+                //     log.error("解析失败", response);
+                //     log.error("发送的内容", data);
                 //     return;
                 // }
                 const resElement = domParser.parseFromString(response, "text/xml").documentElement!
@@ -261,7 +265,7 @@ export class XMPPConnection extends EventEmitter {
             }
         } else if (this.status === Status.STREAM_ESTABLISHED) {
             if (data.includes("stream:features") && data.includes("mechanisms")) {
-                // console.log("开始认证", data);
+                // log.debug("开始认证", data);
                 // HACK: xmldom有bug，无法解析stream:features标签
                 // 添加一个根元素
                 data = `<root xmlns:stream="http://etherx.jabber.org/streams">${data}</root>`;
@@ -316,7 +320,7 @@ export class XMPPConnection extends EventEmitter {
             this.send(auth);
             this.status = Status.AUTHENTICATING;
         } else if (this.status === Status.AUTHENTICATING) {
-            console.log("scramAuth", data);
+            log.debug("scramAuth", data);
             if (data.includes("challenge")) {
                 const challenge = domParser.parseFromString(data, "text/xml")
                     .documentElement!;
@@ -339,15 +343,15 @@ export class XMPPConnection extends EventEmitter {
                     .documentElement!;
                 const v = atob(xml.textContent!).split("v=")[1];
                 if (!v) throw new Error("无法解析服务器签名");
-                console.log("v", v);
+                log.debug("v", v);
 
                 if (v !== this.sasl.serverProof) {
-                    console.log(this.sasl.serverProof);
+                    log.debug(this.sasl.serverProof);
                     // 关闭连接
                     this.disconnect();
                     throw new Error("服务器签名不匹配");
                 }
-                console.log("认证成功");
+                log.debug("认证成功");
                 this.status = Status.AUTHENTICATED;
                 // 重新开始xmpp流
                 const stream = `<?xml version='1.0'?><stream:stream to="${this.domain}" version="1.0" xmlns="jabber:client" xmlns:stream="http://etherx.jabber.org/streams">`;
@@ -369,7 +373,7 @@ export class XMPPConnection extends EventEmitter {
         } else if (this.status === Status.AUTHENTICATING) {
             if (data.includes("success")) {
                 this.status = Status.AUTHENTICATED;
-                console.log("认证成功");
+                log.debug("认证成功");
                 // 重新开始xmpp流
                 const stream = `<stream:stream to="${this.domain}" version="1.0" xmlns="jabber:client" xmlns:stream="http://etherx.jabber.org/streams">`;
                 this.send(stream);
@@ -385,19 +389,19 @@ export class XMPPConnection extends EventEmitter {
         if (data.includes("stream:features") && data.includes("urn:ietf:params:xml:ns:xmpp-bind")) {
             this.status = Status.BINDING;
             const bind = `<iq type='set' id='bind-resource' to="${this.jid.domain}"><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><resource>${this.resource}</resource></bind></iq>`;
-            console.log("绑定资源");
-            console.log("接收到的", data);
+            log.debug("绑定资源");
+            log.debug("接收到的", data);
             this.sendAsync(bind).then((response) => {
                 // 获取jid标签的connentText
                 const jid = response.getElementsByTagName("jid")[0].textContent;
                 if (jid === `${this.jid.bare}/${this.resource}`) {
-                    console.log("绑定成功", jid);
+                    log.debug("绑定成功", jid);
                     this.emit("binded");
                     this.status = Status.BINDED;
 
                     // 发送在线状态，开始接受消息，由connection类完成
                 } else {
-                    console.error("绑定失败", jid);
+                    log.error("绑定失败", jid);
                 }
             });
         }

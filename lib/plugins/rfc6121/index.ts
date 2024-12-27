@@ -20,7 +20,6 @@ class RFC6121 implements Plugin {
   }
 
   init() {
-    console.log("RFC6121 init");
     this.connection.registerStanzaPlugin(RFC6121.NS, RFC6121.parseRseterEl);
     this.connection.registerEventPlugin("roster:update",{
       tagName:"iq",

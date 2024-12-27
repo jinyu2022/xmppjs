@@ -1,6 +1,9 @@
 import type { Connection } from "./connection";
 import { xmlSerializer, implementation } from "./shims";
 import type { JID } from "./JID";
+import logger from "./log";
+
+const log = logger.getLogger("stanza");
 type presShow = "away" | "chat" | "dnd" | "xa";
 export class StanzaBase {
   static readonly NS = "jabber:client" as const;
@@ -150,7 +153,7 @@ export class Message extends StanzaBase {
     const to = message.getAttribute("to");
     const from = message.getAttribute("from");
     const type = message.getAttribute("type") ?? "normal";
-    console.log("type", message.getAttribute("type"));
+    log.debug("type", message.getAttribute("type"));
     // 查找直接子节点subject
     const subjectEl = Array.from(message.childNodes).filter(
       (child) =>

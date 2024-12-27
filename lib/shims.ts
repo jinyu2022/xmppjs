@@ -1,13 +1,20 @@
 // @ts-nocheck
 import type xmldom from '@xmldom/xmldom';
 import type { WebSocket as NodeWebSocket } from 'ws';
+
+// HACK：xmldom 0.9.* 解析有问题，需要手动指定命名空间
+const NS_MAP = {
+    'stream': 'http://etherx.jabber.org/streams',
+} as const;
+
 function getDOMParser() {
     if (typeof window !== 'undefined' && window.DOMParser) {
-        return new DOMParser();
+        return new DOMParser({xmlns: NS_MAP});
     }
     try {
         const { DOMParser } = require('@xmldom/xmldom');
         return new DOMParser({
+            xmlns: NS_MAP,
             onError: (error) => {
                 console.error('解析错误:', error);
             }
