@@ -212,6 +212,7 @@ export class Connection extends EventEmitter {
   /**
    * 卸载插件，会自动卸载依赖于该插件的插件，应该由插件自己调用
    * 他只是帮你卸载依赖，记得自己取消监听器
+   * @experimental 问题很大，你还需要卸载各种节处理器和事件处理器
    * @param name 插件名称，XEP0000格式
    */
   deregisterPlugin(name: keyof typeof plugins) {
@@ -329,11 +330,11 @@ export class Connection extends EventEmitter {
   }
 
   onMessage(message: string) {
-    log.trace("receive", message);
+    log.debug("receive", message);
     let stanza: Element;
-    try{
+    try {
       stanza = domParser.parseFromString(message, "text/xml").documentElement!;
-    }catch(e){
+    } catch (e) {
       log.error("解析失败", e, message);
       return;
     }
@@ -356,6 +357,7 @@ export class Connection extends EventEmitter {
 
     if (tagName === "message") {
       stanzaInstance = new Message(stanza, this);
+      this.traverseAndTransform(stanzaInstance);
       for (const eventPlugin of this.eventPlugins[tagName]) {
         if (eventPlugin.matcher(stanzaInstance)) {
           this.emit(eventPlugin.eventName, stanzaInstance);
@@ -363,13 +365,30 @@ export class Connection extends EventEmitter {
       }
     } else if (tagName === "iq") {
       stanzaInstance = new Iq(stanza, this);
+      this.traverseAndTransform(stanzaInstance);
+      for (const eventPlugin of this.eventPlugins[tagName]) {
+        if (eventPlugin.matcher(stanzaInstance)) {
+          this.emit(eventPlugin.eventName, stanzaInstance);
+        }
+      }
     } else if (tagName === "presence") {
       stanzaInstance = new Presence(stanza, this);
+      this.traverseAndTransform(stanzaInstance);
+      for (const eventPlugin of this.eventPlugins[tagName]) {
+        if (eventPlugin.matcher(stanzaInstance)) {
+          this.emit(eventPlugin.eventName, stanzaInstance);
+        }
+      }
     } else {
       stanzaInstance = new StanzaBase(stanza, this);
+      this.traverseAndTransform(stanzaInstance);
+      for (const eventPlugin of this.eventPlugins[tagName]) {
+        if (eventPlugin.matcher(stanzaInstance)) {
+          this.emit(eventPlugin.eventName, stanzaInstance);
+        }
+      }
     }
 
-    this.traverseAndTransform(stanzaInstance);
     return stanzaInstance;
   }
 
@@ -382,18 +401,23 @@ export class Connection extends EventEmitter {
   private traverseAndTransform(obj: Record<string, unknown>) {
     // HACK：使用 instanceof Element 我无法做到同时兼容浏览器和node环境
     for (const [key, value] of Object.entries(obj)) {
-      if (!value || typeof value !== "object" || Array.isArray(obj)) continue;
-      // log.debug(key);
+      log.debug(key);
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      log.debug({ key, NS: (value as Element).namespaceURI });
       if (this.stanzaPlugins.has((value as Element).namespaceURI ?? "")) {
         const handler = this.stanzaPlugins.get(
           (value as Element).namespaceURI!
         )!;
         const transformed = handler(value as Element);
+        log.debug("处理后：", transformed);
         this.traverseAndTransform(transformed);
         // 重新赋值
         delete obj[key];
         Object.assign(obj, transformed);
+      } else {
+        this.traverseAndTransform(value as Record<string, unknown>);
       }
+      log.debug("结束后的源对象：", obj);
     }
     return obj;
   }

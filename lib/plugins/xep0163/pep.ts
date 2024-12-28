@@ -1,6 +1,7 @@
 import { JID } from "@/JID";
 import { Pubsub } from "../xep0060/pubsub";
 export class PEP {
+    
     /**
      * 创建一个检索项目的 IQ 请求。
      * @param to - 要发送请求的 JID。
@@ -15,9 +16,20 @@ export class PEP {
     /**
      * 创建一个发布消息的iq
      * @param publish 
+     * @param publishOptions
      * @returns 
      */
-    static createPublishIq(publish: Element){
-        return Pubsub.createPublishIq(publish);
+    static createPublishIq(publish: Element, publishOptions?: Element){
+        return Pubsub.createPublishIq(publish, publishOptions);
+    }
+
+    /**
+     * 创建一个撤回消息的iq
+     * @param node 
+     * @param id 
+     * @param notify 
+     */
+    static createRetractIq(node: string, id: string, notify?: boolean){
+        return Pubsub.createRetractIq(node, id, notify);
     }
 }

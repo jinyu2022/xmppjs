@@ -21,7 +21,7 @@ export class XEP0030 extends Disco implements Plugin {
     this.addFeature(Disco.NS.DISCO_INFO);
     this.addFeature(Disco.NS.DISCO_ITEMS);
 
-    this.connection.socket!.once('binded', async () => {
+    this.connection.once('session:start', async () => {
       const iq = Iq.createIq("get",this.connection.jid.domain ,Disco.NS.DISCO_INFO);
       let identities: Identity[]
       let features: string[]
