@@ -28,7 +28,7 @@ class RFC6121 implements Plugin {
       }
     });
 
-    // 回应roster更新
+    // 回应roster更新，本地更新另作处理
     this.connection.on("roster:update", (iq) => {
       const doc = implementation.createDocument("jabber:client", "iq", null);
       const iqEl = doc.documentElement!;

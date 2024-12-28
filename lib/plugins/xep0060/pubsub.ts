@@ -3,11 +3,12 @@ import { JID } from "@/JID";
 export interface PubsubEventItems {
     node: string;
     retracts?: string[];
-    item: PubsubEventItem
+    items: PubsubEventItem[];
 }
 export interface PubsubEventItem {
     id?: string;
     publisher?: string;
+    // 根据节点的不同，可能有不同的子元素
 }
 export class Pubsub {
     static readonly NS = {
@@ -40,28 +41,31 @@ export class Pubsub {
             throw new Error("不是一个event元素");
         if (eventEl.getElementsByTagName("items").length > 0) {
             // 解析item
-            const items = eventEl.getElementsByTagName("items")[0];
-            const node = items.getAttribute("node")!;
-            const retract = items.getElementsByTagName("retract");
+            const itemsEL = eventEl.getElementsByTagName("items")[0];
+            const node = itemsEL.getAttribute("node")!;
+            const retract = itemsEL.getElementsByTagName("retract");
             const retracts =
                 retract.length > 0
                     ? Array.from(retract).map((retract) => retract.getAttribute("id")!)
                     : void 0;
-            const itemEL = items.getElementsByTagName("item")[0];
-            const itemId = itemEL?.getAttribute("id") ?? void 0;
-            const publisher = itemEL?.getAttribute("publisher") ?? void 0;
-            const children = itemEL?.childNodes[0];
+            const itemELs = itemsEL.getElementsByTagName("item");
+            const items = Array.from(itemELs).map((itemEL) => {
+                const id = itemEL.getAttribute("id") ?? void 0;
+                const publisher = itemEL.getAttribute("publisher") ?? void 0;
+                const children = itemEL.childNodes[0];
+                return {
+                    id,
+                    publisher,
+                    [children.nodeName]: children,
+                };
+            })
             return {
                 event: {
                     node,
                     retracts,
-                    item:{
-                        id: itemId,
-                        publisher,
-                        [children.nodeName]: children,
-                    },
+                    items
                 },
-            };
+            } as Record<"event", PubsubEventItems>;
         } else if (eventEl.getElementsByTagName("collection").length > 0) {
             return {
                 event: {

@@ -32,7 +32,7 @@ export class XMPPError extends Error {
   readonly type: ErrorTypes | null = null;
   readonly text: string | null = null;
 
-  readonly xmlElement: Element;
+  // readonly xmlElement: Element;
   /** 标签名，message、persence、iq */
   readonly tagName: string;
   readonly xmlString: string;
@@ -41,7 +41,7 @@ export class XMPPError extends Error {
 
   constructor(stanza: Element, message: string) {
     super(message);
-    this.xmlElement = stanza;
+    // this.xmlElement = stanza;
     this.tagName = stanza.tagName;
     this.to = stanza.getAttribute("to");
     this.from = stanza.getAttribute("from");
@@ -51,15 +51,17 @@ export class XMPPError extends Error {
     if (!error) return;
 
     const condition = error.getElementsByTagNameNS(this.NS, "*")[0]?.tagName;
-    if (!condition) {
-      throw new Error("没有condition节点");
-    } else if (
+    // if (!condition) {
+    //   throw new Error("没有condition节点");
+    // } else 
+    if (
       ErrorConditions.includes(condition as (typeof ErrorConditions)[number])
     ) {
       this.condition = condition as (typeof ErrorConditions)[number];
-    } else {
-      throw new Error("未知的condition");
-    }
+    } 
+    // else {
+    //   throw new Error("未知的condition");
+    // }
 
     const type = error.getAttribute("type");
     this.type = type as ErrorTypes;
