@@ -9,6 +9,7 @@ type MsgType = "normal" | "chat" | "groupchat" | "error";
 export class StanzaBase {
   static readonly NS = "jabber:client" as const;
 
+  /** TIP: 可以直接访问，但无法枚举 */
   private readonly connection: Connection;
   /** TIP: 可以直接访问，但无法枚举 */
   readonly xml: Element;
@@ -35,6 +36,12 @@ export class StanzaBase {
     this.from = stanza.getAttribute("from");
 
     this.connection = connection;
+    Object.defineProperty(this, "connection", {
+      value: connection,
+      writable: false, // 属性不可修改
+      enumerable: false, // 属性不可枚举
+      configurable: true, // 属性可删除或重新定义
+    });
   }
 
   static parseBaseStanza(stanza: Element) {
