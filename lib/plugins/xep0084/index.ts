@@ -99,28 +99,7 @@ import type { AvatarMetadata } from "./avatar";
 declare module "../xep0060/pubsub" {
     interface PubsubEventItem {
         /** XEP0084添加 */
-        metadata: AvatarMetadata;
+        metadata?: AvatarMetadata;
     }
 }
-// declare module "@/stanza" {
-//     interface Message {
-//         event?: PubsubEventItems | AvatarEventItem; // 允许 event 是 PubsubEventItems 或 AvatarEventItem
-//     }
-// }
-// declare module "@/stanza" {
-//     interface Message {
-//         event?: {
-//             node: string;
-//             retracts?: string[];
-//             item: {
-//                 id?: string;
-//                 publisher?: string;
-//                 // [key: string]: Element | string | Record<string, unknown> |undefined;
-//             } &  {
-//                 [key: string]: Element | string | Record<string, unknown> |undefined;
-//                 aaa: string;
-//             }
-//         }
-//     }
-// }
 export default XEP0084;

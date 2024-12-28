@@ -262,10 +262,11 @@ export class XMPPConnection extends EventEmitter {
         if (this.status === Status.STREAM_START) {
             if (data.includes("<?xml version='1.0'?>")) {
                 this.status = Status.STREAM_ESTABLISHED;
+                log.debug("开始xmpp流");
             }
         } else if (this.status === Status.STREAM_ESTABLISHED) {
             if (data.includes("stream:features") && data.includes("mechanisms")) {
-                // log.debug("开始认证", data);
+                log.debug("开始认证");
                 // HACK: xmldom有bug，无法解析stream:features标签
                 // 添加一个根元素
                 data = `<root xmlns:stream="http://etherx.jabber.org/streams">${data}</root>`;

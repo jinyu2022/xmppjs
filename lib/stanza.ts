@@ -5,6 +5,7 @@ import logger from "./log";
 
 const log = logger.getLogger("stanza");
 type presShow = "away" | "chat" | "dnd" | "xa";
+type MsgType = "normal" | "chat" | "groupchat" | "error";
 export class StanzaBase {
   static readonly NS = "jabber:client" as const;
 
@@ -143,7 +144,7 @@ export class Message extends StanzaBase {
     {
       to: string | null;
       from: string | null;
-      type: string;
+      type: 'normal' | 'chat' | 'groupchat' | 'error';
       subject: string | null;
       body: string | null;
       [key: string]: Element | string | null;
@@ -152,7 +153,7 @@ export class Message extends StanzaBase {
     // const id = message.getAttribute("id");
     const to = message.getAttribute("to");
     const from = message.getAttribute("from");
-    const type = message.getAttribute("type") ?? "normal";
+    const type = (message.getAttribute("type") ?? "normal") as MsgType;
     log.debug("type", message.getAttribute("type"));
     // 查找直接子节点subject
     const subjectEl = Array.from(message.childNodes).filter(
@@ -185,6 +186,16 @@ export class Message extends StanzaBase {
         ...children,
       },
     };
+  }
+
+  static createMessage(to: JID|string, body: string, type = "normal") {
+    const message = implementation.createDocument("jabber:client", "message", null);
+    message.documentElement!.setAttribute("to", to.toString());
+    message.documentElement!.setAttribute("type", type);
+    const bodyEl = message.createElement("body");
+    bodyEl.textContent = body;
+    message.documentElement!.appendChild(bodyEl);
+    return message;
   }
 }
 

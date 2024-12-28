@@ -210,7 +210,8 @@ export class Connection extends EventEmitter {
   }
 
   /**
-   * 卸载插件，会自动卸载依赖于该插件的插件
+   * 卸载插件，会自动卸载依赖于该插件的插件，应该由插件自己调用
+   * 他只是帮你卸载依赖，记得自己取消监听器
    * @param name 插件名称，XEP0000格式
    */
   deregisterPlugin(name: keyof typeof plugins) {
@@ -328,7 +329,7 @@ export class Connection extends EventEmitter {
   }
 
   onMessage(message: string) {
-    log.debug("receive", message);
+    log.trace("receive", message);
     let stanza: Element;
     try{
       stanza = domParser.parseFromString(message, "text/xml").documentElement!;
