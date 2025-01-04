@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
-import { v4 as uuidv4 } from "uuid";
 import { domParser, xmlSerializer, WS } from "../shims";
+import { EntityCaps, Capabilities } from "@/plugins/xep0115/entityCaps";
 import { TimeoutError } from "../errors";
 import { Status } from "./typing";
 import type WebSocket from "ws";
@@ -60,7 +60,10 @@ export class WSConnection extends EventEmitter {
   private readonly password: string;
   private ws: WebSocket | null = null;
   private url: string = "";
-  private status: Status = Status.DISCONNECTED;
+  status: Status = Status.DISCONNECTED;
+  /** 流特性 */
+  streamFeatures: Set<string> = new Set();
+  entityCaps?: Capabilities;
   clientFirstMessageBare?: string;
   resource = "xmppjs.uig48";
   constructor(jid: JID, password: string) {
@@ -71,13 +74,14 @@ export class WSConnection extends EventEmitter {
   }
 
   connect(url: string) {
-    this.url = url;
-    this.ws = new WS(url, "xmpp");
-    log.debug("connecting", url);
-    this.ws.onopen = (ev) => this.onOpen(ev);
-    this.ws.onclose = (ev) => this.onClose(ev);
-    this.ws.onmessage = (ev) => this.onMessage(ev);
-    this.ws.onerror = (ev) => this.onError(ev);
+      this.url = url;
+      this.ws = new WS(url, "xmpp");
+      log.debug("connecting", url);
+      this.ws.onopen = (ev) => this.onOpen(ev);
+      this.ws.onclose = (ev) => this.onClose(ev);
+      this.ws.onmessage = (ev) => this.onMessage(ev);
+      this.ws.onerror = (ev) => this.onError(ev);
+      return Promise.resolve();
   }
 
   send(data: Element | string) {
@@ -160,6 +164,8 @@ export class WSConnection extends EventEmitter {
 
   onClose(ev: WebSocket.CloseEvent) {
     this.status = Status.DISCONNECTED;
+    // 移除事件
+    this.removeAllListeners();
     this.emit("disconnect", ev);
     log.debug("ws连接close", ev.code, ev.reason);
   }
@@ -181,6 +187,22 @@ export class WSConnection extends EventEmitter {
     log.error("error", ev);
   }
 
+    /**
+   * 解析流特性
+   */
+    private parseStreamFeatures(data: string) {
+      const features = domParser.parseFromString(data, "text/xml")
+          .documentElement!;
+      for (const feature of features.childNodes) {
+          if (feature.namespaceURI) {
+              this.streamFeatures.add(feature.namespaceURI);
+              if (feature.namespaceURI === EntityCaps.NS) {
+                  this.entityCaps = EntityCaps.parseCaps(feature as Element);
+              }
+          }
+      }
+  }
+  
   private async prepareSession(data: string) {
     if (this.status === Status.STREAM_START) {
       // 发送open标签在onOpen中，这里接收open标签证明已经建立了xmpp流
@@ -379,9 +401,6 @@ export class WSConnection extends EventEmitter {
     this.send(closeXML);
     // 关闭ws连接
     this.close();
-    this.status = Status.DISCONNECTED;
-    // 关闭事件
-    this.removeAllListeners();
     this.ws = null;
     log.debug("关闭连接");
   }

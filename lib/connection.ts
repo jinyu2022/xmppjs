@@ -50,12 +50,20 @@ export interface SocketEventMap {
   iq: Iq;
   presence: Presence;
   others: StanzaBase;
+  connect: void;
   "session:start": void;
+  "session:end": void;
+  disconnect: void;
   // [key: string | symbol]: unknown;
 }
 // 扩展 EventEmitter 类型定义
 export interface Connection extends EventEmitter {
   on<E extends keyof SocketEventMap>(
+    event: E,
+    listener: (arg: SocketEventMap[E]) => void
+  ): this;
+
+  off<E extends keyof SocketEventMap>(
     event: E,
     listener: (arg: SocketEventMap[E]) => void
   ): this;
@@ -91,7 +99,10 @@ export class Connection extends EventEmitter {
   url?: string;
   /** 是否启用tls，在本地调试的时候您可能不需要，默认为true */
   tls = true;
-  /* 当前的连接 */
+  /**
+   * 当前的连接实例
+   * @warrning 你要知道你自己在做什么
+   */
   socket: XMPPConnection | WSConnection | null = null;
   /** 插件列表，键是插件名 */
   private readonly pendingPlugins = new Map<string, PluginConstructor>();
@@ -111,6 +122,13 @@ export class Connection extends EventEmitter {
     others: [],
   } as const;
 
+  private readonly interceptors: Map<
+    "send" | "receive",
+    Array<(stanza: Element) => Element>
+  > = new Map([
+    ["send", []],
+    ["receive", []],
+  ]);
   // [plugin: keyof typeof plugins]: Plugin | undefined;
   [name: string]: unknown;
 
@@ -269,6 +287,19 @@ export class Connection extends EventEmitter {
     this.eventPlugins[tagName].push({ eventName, matcher });
   }
 
+  /** 注册拦截器
+   * 也许以后会有更多功能，但目前只是为了流管理
+   * @param type 拦截类型
+   * @param handler 拦截处理器
+   */
+  registerInterceptor(
+    type: "send" | "receive",
+    handler: (stanza: Element) => Element
+  ) {
+    this.interceptors.get(type)!.push(handler);
+    log.info(`注册拦截器 ${type}`);
+  }
+
   connect() {
     if (this.protocol !== "xmpp" && !this.url && !this.XEP0156) {
       throw new Error("未指定 url");
@@ -279,15 +310,17 @@ export class Connection extends EventEmitter {
         // 初始化插件
         this.initPlugins();
         this.socket.connect(this.url!);
-        this.setupSocketEvents();
+        this._setupSocketEvents();
       });
     } else {
       this.socket = this.createSocket() as XMPPConnection;
       this.initPlugins();
-      this.socket.connect();
-      this.setupSocketEvents();
+      this.socket.connect(this.url);
+      this._setupSocketEvents();
     }
+    // this.emit("connected");
   }
+
   private createSocket() {
     if (this.protocol === "ws") {
       return new WSConnection(this.jid, this.password);
@@ -300,21 +333,33 @@ export class Connection extends EventEmitter {
       throw new Error("未知的协议");
     }
   }
-  private setupSocketEvents() {
+
+  /**
+   * 监听socket事件
+   * @private 仅供内部使用
+   */
+  _setupSocketEvents() {
     if (!this.socket) return;
-    this.socket.once("close", () => {
-      log.debug("连接已关闭");
-      this.socket = null;
+    this.socket.once("connect", () => {
+      log.info("连接已建立");
+      this.emit("connect");
+    });
+    this.socket.once("disconnect", () => {
+      log.info("连接已关闭");
+      this.emit("disconnect")
+      // this.socket = null;
     });
     this.socket.on("net:message", (message) => this.onMessage(message));
     this.socket.once("binded", () => {
-      this.socket?.send(
-        '<presence xmlns="jabber:client"><show>dnd</show></presence>'
-      );
       this.emit("session:start");
-      log.debug("连接成功, 会话开始!");
     });
+    this.socket.once("session:end", () => {
+      log.info("会话结束");
+      this.emit("session:end")
+
+    })
   }
+
   disconnect() {
     // 清除所有监听器
     this.removeAllListeners();
@@ -329,8 +374,9 @@ export class Connection extends EventEmitter {
     this.stanzaPlugins.clear();
   }
 
-  onMessage(message: string) {
+  private onMessage(message: string) {
     log.debug("receive", message);
+
     let stanza: Element;
     try {
       stanza = domParser.parseFromString(message, "text/xml").documentElement!;
@@ -338,8 +384,11 @@ export class Connection extends EventEmitter {
       log.error("解析失败", e, message);
       return;
     }
-
-    this.emit("stanza", stanza);
+    // 拦截器
+    for (const handler of this.interceptors.get("receive")!) {
+      stanza = handler(stanza);
+    }
+    // this.emit("stanza", stanza);
 
     const tagName = ["message", "iq", "presence"].includes(stanza.tagName)
       ? (stanza.tagName as keyof StanzaHandlerMap)
@@ -401,15 +450,12 @@ export class Connection extends EventEmitter {
   private traverseAndTransform(obj: Record<string, unknown>) {
     // HACK：使用 instanceof Element 我无法做到同时兼容浏览器和node环境
     for (const [key, value] of Object.entries(obj)) {
-      log.debug(key);
       if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      log.debug({ key, NS: (value as Element).namespaceURI });
       if (this.stanzaPlugins.has((value as Element).namespaceURI ?? "")) {
         const handler = this.stanzaPlugins.get(
           (value as Element).namespaceURI!
         )!;
         const transformed = handler(value as Element);
-        log.debug("处理后：", transformed);
         this.traverseAndTransform(transformed);
         // 重新赋值
         delete obj[key];
@@ -417,12 +463,23 @@ export class Connection extends EventEmitter {
       } else {
         this.traverseAndTransform(value as Record<string, unknown>);
       }
-      log.debug("结束后的源对象：", obj);
     }
     return obj;
   }
 
-  send(stanza: Element) {
+  /**
+   * 发送一个stanza
+   * @param stanza 如果是字符串，直接发送，你要知道自己在干什么
+   */
+  send(stanza: Element | string) {
+    if (typeof stanza === "string") {
+      stanza = domParser.parseFromString(stanza, "text/xml").documentElement!;
+      for (const handler of this.interceptors.get("send")!) {
+        stanza = handler(stanza);
+      }
+      this.socket?.send(stanza);
+      return;
+    }
     // 检查必须的流属性
     // XXX: 我不清楚需要进行那些检查,多余, 或者缺失
 
@@ -448,6 +505,10 @@ export class Connection extends EventEmitter {
     if (stanza.tagName === "message" && !stanza.getAttribute("xml:lang")) {
       stanza.setAttribute("xml:lang", "en");
     }
+
+    for (const handler of this.interceptors.get("send")!) {
+      stanza = handler(stanza);
+    }
     this.socket?.send(stanza);
   }
 
@@ -464,12 +525,12 @@ export class Connection extends EventEmitter {
 
     // 一个拥有特定接收者的节必须拥有一个'to'属性
     // 一个从客户端发送到服务器的由该服务器直接处理的节(例如, presence状态信息)不能拥有'to'属性
-    if (stanza.tagName === "message" && !stanza.getAttribute("to")) {
-      throw new Error("message stanza缺少to属性");
-    }
-    if (stanza.tagName === "iq" && !stanza.getAttribute("type")) {
-      throw new Error("iq stanza缺少type属性");
-    }
+    // if (stanza.tagName === "message" && !stanza.getAttribute("to")) {
+    //   throw new Error("message stanza缺少to属性");
+    // }
+    // if (stanza.tagName === "iq" && !stanza.getAttribute("type")) {
+    //   throw new Error("iq stanza缺少type属性");
+    // }
     // 如果没有, 服务器会自动填充
     // if (!stanza.getAttribute("from")) {
     //   stanza.setAttribute("from", this.jid.full);
@@ -477,16 +538,34 @@ export class Connection extends EventEmitter {
     if (!stanza.getAttribute("id")) {
       stanza.setAttribute("id", uuidv4());
     }
-    if (!stanza.namespaceURI) {
-      stanza.setAttribute("xmlns", "jabber:client");
-    }
+    // if (!stanza.namespaceURI) {
+    //   stanza.setAttribute("xmlns", "jabber:client");
+    // }
     // 一个节应该拥有'xml:lang'属性，如果这个节包含了XML字符串数据打算展示给用户
-    if (stanza.tagName === "message" && !stanza.getAttribute("xml:lang")) {
-      stanza.setAttribute("xml:lang", "en");
-    }
+    // if (stanza.tagName === "message" && !stanza.getAttribute("xml:lang")) {
+    //   stanza.setAttribute("xml:lang", "en");
+    // }
     if (!this.socket) throw new Error("未连接");
-
-    return this.socket.sendAsync(stanza, timeout);
+    const id = stanza.getAttribute("id")!;
+    const tagName = (["message", "iq", "presence"].includes(stanza.tagName)
+      ? (stanza.tagName)
+      : "others") as "message" | "iq" | "presence" | "others";
+    return new Promise<Element>((resolve, reject) => {
+      const handler = (response: StanzaBase) => {
+        if (response.id === id) {
+          this.off(tagName, handler);
+          clearTimeout(timer);
+          resolve(response.xml);
+        }
+      };
+      this.on(tagName, handler);
+      this.send(stanza);
+      const timer = setTimeout(() => {
+        this.off(tagName, handler);
+        reject(new TimeoutError("发送stanza超时"));
+      }, timeout);
+    });
+    // return this.socket.sendAsync(stanza, timeout);
   }
 
   /**
