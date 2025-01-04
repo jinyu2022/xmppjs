@@ -3,6 +3,7 @@ import { connect as tlsConnect, TLSSocket } from "tls";
 import { resolveXMPPSrv, EndpointInfo } from "../dns";
 import { domParser, xmlSerializer } from "@/shims";
 import { XMPPError, TimeoutError } from "@/errors";
+import { EntityCaps, Capabilities } from "@/plugins/xep0115/entityCaps";
 import { Status } from "./typing";
 import { EventEmitter } from "events";
 import { JID } from "../JID";
@@ -18,10 +19,12 @@ interface SaslData {
 // 定义所有可能的事件参数类型
 interface SocketEventMap {
     connect: void;
+    // 连接已关闭
     disconnect: void;
     error: Error;
     authenticated: void;
     "stream:start": void;
+    "stream:negotiated": void;
     "stream:end": void;
     // stanza: { name: string; attrs: Record<string, string>; children: any[] };
     "net:message": string;
@@ -58,10 +61,15 @@ export class XMPPConnection extends EventEmitter {
     private readonly resource: string;
     private socket: Socket | TLSSocket | null = null;
     private readonly domain: string;
-    private endpoints: EndpointInfo[] = []; // 可用的服务器端点列表
-    private currentEndpoint = 0; // 当前使用的端点索引
+    private host: string;
+    private port = "5222";
+    // private endpoints: EndpointInfo[] = []; // 可用的服务器端点列表
+    // private currentEndpoint = 0; // 当前使用的端点索引
     private readonly tls: boolean; // 是否使用TLS
-    private status = 0; // 连接状态
+    status = 0; // 连接状态
+    /** 流特性 */
+    streamFeatures: Set<string> = new Set();
+    entityCaps?: Capabilities;
     private readonly sasl: SaslData = {};
     private reconnectAttempts = 0; // 重连次数
     private readonly maxReconnectAttempts = 3; // 最大重连次数
@@ -75,58 +83,44 @@ export class XMPPConnection extends EventEmitter {
         this.password = password;
         this.tls = tls;
         this.domain = jid.domain;
-        this.resource = jid.resource ?? Math.random().toString(32).slice(2, 8);;
+        this.host = jid.domain;
+        this.resource = jid.resource ?? Math.random().toString(32).slice(2, 8);
     }
 
-    connect() {
-        resolveXMPPSrv(this.domain, this.tls).then((endpoints) => {
+    async connect(url?: string) {
+        if (url) {
+            const ParsedUrl = new URL(url);
+            this.host = ParsedUrl.hostname;
+            this.port = ParsedUrl.port;
+        } else {
+            const endpoints = await resolveXMPPSrv(this.domain, this.tls);
             if (!endpoints.length) throw new Error("未找到可用的服务器端点");
-            log.debug("endpoints", endpoints);
-            this.endpoints = endpoints;
-            for (const endpoint of this.endpoints) {
-                try {
-                    if (this.tls) {
-                        this.createSecureConnection(endpoint);
-                    } else {
-                        this.createConnection(endpoint);
-                    }
-                    this.setupSocketListeners();
-                    break;
-                } catch (error) {
-                    log.error(
-                        `连接到 ${endpoint.host}:${endpoint.port} 失败:`,
-                        error
-                    );
-                    continue;
-                }
-            }
-        });
-    }
+            const endpoint = endpoints[0];
+            this.host = endpoint.host;
+            this.port = endpoint.port.toString();
+        }
 
-    /**
-     * 创建普通TCP连接
-     */
-    private createConnection(endpoint: EndpointInfo) {
-        // 开始连接
+        let options = {
+            host: this.host,
+            port: parseInt(this.port),
+            timeout: 30000,
+        };
+        if (this.tls) {
+            Object.assign(options, {
+                servername: this.host,
+                ALPNProtocols: ["xmpp-client"],
+            });
+            this.socket = tlsConnect(options);
+            // 设置Socket事件监听器
+            this.setupSocketListeners();
+        } else {
+            this.socket = new Socket();
+            // 设置Socket事件监听器
+            this.setupSocketListeners();
+            this.socket.connect(options);
+        }
         this.status = Status.CONNECTING;
-        this.socket = new Socket();
-        this.socket.connect({
-            host: endpoint.host,
-            port: endpoint.port,
-        });
-    }
-
-    /**
-     * 创建TLS加密连接
-     */
-    private createSecureConnection(endpoint: EndpointInfo): void {
-        log.debug("创建TLS连接");
-        this.socket = tlsConnect({
-            host: endpoint.host,
-            port: endpoint.port,
-            servername: endpoint.host,
-            ALPNProtocols: ["xmpp-client"],
-        });
+        log.info(`已连接到 ${this.host}:${this.port}`);
     }
 
     /**
@@ -134,6 +128,7 @@ export class XMPPConnection extends EventEmitter {
      */
     private setupSocketListeners(): void {
         this.socket!.once("connect", () => {
+            log.info("连接成功");
             this.status = Status.CONNECTED;
             const startStream = `<?xml version="1.0"?><stream:stream to="${this.domain}" version="1.0" xmlns="jabber:client" xmlns:stream="http://etherx.jabber.org/streams">`;
             this.send(startStream);
@@ -146,59 +141,99 @@ export class XMPPConnection extends EventEmitter {
         });
 
         this.socket!.on("error", (error) => {
+            log.error("连接错误", error);
             this.emit("error", error);
             // 应该立刻关闭当前连接，并尝试重连
         });
 
         this.socket!.on("close", () => {
+            if (this.status !== Status.SESSIONEND) {
+                this.status = Status.SESSIONEND;
+                this.emit("session:end");
+                log.info("发出会话结束事件");
+            }
+            // 移除所有监听器
+            this.removeAllListeners();
+            this.socket?.removeAllListeners();
             this.status = Status.DISCONNECTED;
-            this.emit("close");
+            this.emit("disconnect");
             // this.handleReconnect();
         });
     }
 
     private onData(data: string) {
-        log.trace("接收", data);
+        log.debug("接收", data);
         if (this.status < Status.AUTHENTICATED) {
             this.authenticateUser(data);
         } else if (this.status < Status.BINDING) {
+            if (data.includes("</stream:features>")) {
+                // 获取所有特性
+                const features = domParser.parseFromString(data, "text/xml")
+                    .documentElement!;
+
+                for (const feature of features.childNodes) {
+                    if (feature.namespaceURI) {
+                        this.streamFeatures.add(feature.namespaceURI);
+                    }
+                }
+                this.emit("stream:negotiated");
+            }
             this.bindResource(data);
-        // TIP: 一定要先发送事件，避免监听到<stream:features>，xmldom无法解析
-        // }
-        // else if (this.status < Status.BINDED){
-        //     this.emit("net:message", data);
-        }else {
-            this.emit("net:message", data);
+            // TIP: 一定要先发送事件，避免监听到<stream:features>，xmldom无法解析
+            // }
+            // else if (this.status < Status.BINDED){
+            //     this.emit("net:message", data);
+        } else {
+            if (data.includes("</stream:features>")) {
+                // 获取所有特性
+                this.parseStreamFeatures(data);
+                this.emit("stream:negotiated");
+            } else if (data.includes("stream:stream")) {
+                return;
+            } else {
+                this.emit("net:message", data);
+            }
+        }
+    }
+
+    /**
+     * 解析流特性
+     */
+    private parseStreamFeatures(data: string) {
+        const features = domParser.parseFromString(data, "text/xml")
+            .documentElement!;
+        for (const feature of features.childNodes) {
+            if (feature.namespaceURI) {
+                this.streamFeatures.add(feature.namespaceURI);
+                if (feature.namespaceURI === EntityCaps.NS) {
+                    this.entityCaps = EntityCaps.parseCaps(feature as Element).cap;
+                }
+            }
         }
     }
     /**
      * 处理重连逻辑
-     * @private
+     * @deprecated
      */
-    private async handleReconnect(): Promise<void> {
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
-            this.reconnectAttempts++;
-            this.currentEndpoint = 0;
-            await new Promise((resolve) =>
-                setTimeout(resolve, 1000 * this.reconnectAttempts)
-            );
-            this.connect();
-        } else {
-            throw new Error("连接失败: 已达到最大重试次数");
-        }
-    }
+    private async handleReconnect(): Promise<void> { }
 
     /**
      * 发送数据
      * @param data 要发送的数据
      * @returns 是否发送成功
      */
-    send(data: string | Element): boolean {
+    send(data: string | Element) {
+        if (this.socket == null) throw new Error("连接已断开");
         if (typeof data !== "string") {
             data = xmlSerializer.serializeToString(data);
         }
-        log.trace("发送", data);
-        return this.socket?.write(data) ?? false;
+        log.debug("发送", data);
+        try {
+            this.socket.write(data);
+        } catch (error) {
+            log.error("发送失败", error);
+            this.disconnect();
+        }
     }
 
     sendAsync(data: string | Element, timeout = 30000): Promise<Element> {
@@ -223,7 +258,8 @@ export class XMPPConnection extends EventEmitter {
                 //     log.error("发送的内容", data);
                 //     return;
                 // }
-                const resElement = domParser.parseFromString(response, "text/xml").documentElement!
+                const resElement = domParser.parseFromString(response, "text/xml")
+                    .documentElement!;
                 const responseId = resElement.getAttribute("id");
                 if (responseId === id) {
                     // 收到匹配的响应，解除监听并解析 Promise
@@ -248,14 +284,12 @@ export class XMPPConnection extends EventEmitter {
 
     /**
      * 升级到TLS连接
+     * @deprecated
      */
     async upgradeToTLS(): Promise<void> {
         if (!this.socket || this.socket instanceof TLSSocket) {
             throw new Error("无效的socket状态");
         }
-        const plainSocket = this.socket;
-        this.createSecureConnection(this.endpoints[this.currentEndpoint]);
-        plainSocket.destroy();
     }
 
     private async authenticateUser(data: string) {
@@ -352,8 +386,9 @@ export class XMPPConnection extends EventEmitter {
                     this.disconnect();
                     throw new Error("服务器签名不匹配");
                 }
-                log.debug("认证成功");
+                log.info("认证成功");
                 this.status = Status.AUTHENTICATED;
+                this.emit("authenticated");
                 // 重新开始xmpp流
                 const stream = `<?xml version='1.0'?><stream:stream to="${this.domain}" version="1.0" xmlns="jabber:client" xmlns:stream="http://etherx.jabber.org/streams">`;
                 this.send(stream);
@@ -374,7 +409,8 @@ export class XMPPConnection extends EventEmitter {
         } else if (this.status === Status.AUTHENTICATING) {
             if (data.includes("success")) {
                 this.status = Status.AUTHENTICATED;
-                log.debug("认证成功");
+                log.info("认证成功");
+                this.emit("authenticated");
                 // 重新开始xmpp流
                 const stream = `<stream:stream to="${this.domain}" version="1.0" xmlns="jabber:client" xmlns:stream="http://etherx.jabber.org/streams">`;
                 this.send(stream);
@@ -387,16 +423,18 @@ export class XMPPConnection extends EventEmitter {
     }
 
     private bindResource(data: string) {
-        if (data.includes("stream:features") && data.includes("urn:ietf:params:xml:ns:xmpp-bind")) {
+        if (
+            data.includes("urn:ietf:params:xml:ns:xmpp-bind") &&
+            this.status === Status.AUTHENTICATED
+        ) {
             this.status = Status.BINDING;
             const bind = `<iq type='set' id='bind-resource' to="${this.jid.domain}"><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><resource>${this.resource}</resource></bind></iq>`;
-            log.debug("绑定资源");
-            log.debug("接收到的", data);
+            log.info("开始绑定资源");
             this.sendAsync(bind).then((response) => {
                 // 获取jid标签的connentText
                 const jid = response.getElementsByTagName("jid")[0].textContent;
                 if (jid === `${this.jid.bare}/${this.resource}`) {
-                    log.debug("绑定成功", jid);
+                    log.info("资源绑定成功", jid);
                     this.emit("binded");
                     this.status = Status.BINDED;
 
@@ -409,19 +447,19 @@ export class XMPPConnection extends EventEmitter {
     }
     disconnect() {
         // 发送关闭流的xml
-        const closeXML = `<close xmlns='urn:ietf:params:xml:ns:xmpp-framing'/>`;
+        const closeXML = `</stream:stream>`;
         this.send(closeXML);
-        // 移除所有监听器
-        this.removeAllListeners();
-        this.socket?.removeAllListeners();
+        log.info("关闭XMPP流");
+        this.status = Status.SESSIONEND;
+        this.emit("session:end");
         this.close();
     }
 
     private close(): void {
         this.socket?.end();
         this.socket?.destroy();
+        log.info("关闭tcp连接");
         this.socket = null;
-        this.status = Status.DISCONNECTED;
     }
 }
 

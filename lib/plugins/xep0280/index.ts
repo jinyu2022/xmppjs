@@ -21,7 +21,6 @@ export class XEP0280 extends Carbons implements Plugin {
       this.connection.XEP0030!.getServerFeatures().then((features) => {
         // log.debug("服务器支持的特性", features);
         if (features.has(XEP0280.NS)) {
-          log.debug("服务器支持 XEP-0280");
           this.enable();
         } else {
           log.warn("服务器不支持 XEP-0280");
@@ -50,11 +49,11 @@ export class XEP0280 extends Carbons implements Plugin {
     const iq = Carbons.createEnableIq();
     this.connection.sendAsync(iq).then((result) => {
       if (result.getAttribute("type") === "result") {
-        log.debug("enable 启动成功");
+        log.debug("消息碳 启动成功");
       } else if (result.getAttribute("type") === "error") {
-        log.debug("enable failed");
+        log.debug("消息碳 enable failed");
       } else {
-        log.error("enable failed");
+        log.error("消息碳 enable failed");
       }
     });
   }
