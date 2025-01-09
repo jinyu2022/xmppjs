@@ -7,6 +7,7 @@ import XEP0115 from "./xep0115";
 import XEP0156 from "./xep0156";
 import XEP0163 from "./xep0163";
 import XEP0172 from "./xep0172";
+import XEP0184 from "./xep0184";
 import XEP0198 from "./xep0198";
 import XEP0199 from "./xep0199";
 import XEP0203 from "./xep0203";
@@ -22,6 +23,7 @@ export {
   XEP0115,
   XEP0156,
   XEP0163,
+  XEP0184,
   XEP0198,
   XEP0199,
   XEP0203,
@@ -40,6 +42,7 @@ export const plugins = {
   XEP0156,
   XEP0163,
   XEP0172,
+  XEP0184,
   XEP0198,
   XEP0199,
   XEP0203,

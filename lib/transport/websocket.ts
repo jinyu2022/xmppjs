@@ -1,15 +1,10 @@
 import { EventEmitter } from "events";
 import { domParser, xmlSerializer, WS } from "../shims";
 import { EntityCaps, Capabilities } from "@/plugins/xep0115/entityCaps";
-import { TimeoutError } from "../errors";
-import { Status } from "./typing";
+import { TimeoutError, XMPPError } from "../errors";
+import { Status, SaslData } from "./typing";
+import { scramResponse, generateSecureNonce } from "../auth/scram";
 import type WebSocket from "ws";
-import {
-  generateSecureNonce,
-  scramParseChallenge,
-  scramDeriveKeys,
-  scramClientProof,
-} from "../auth/scram";
 import { JID } from "../JID";
 import logger from "@/log";
 const log = logger.getLogger("WS");
@@ -19,13 +14,14 @@ interface SocketEventMap {
   connect: void;
   disconnect: WebSocket.CloseEvent;
   error: Error;
+  /** 认证完成，但还没有重启流 */
   authenticated: void;
-  "stream:start": void;
+  "stream:start": void; 
   "stream:end": void;
   // stanza: { name: string; attrs: Record<string, string>; children: any[] };
   "net:message": string;
   "session:start": void;
-  "binded": void;
+  binded: void;
   [event: string | symbol]: unknown;
 }
 
@@ -58,30 +54,35 @@ export interface WSConnection extends EventEmitter {
 export class WSConnection extends EventEmitter {
   private readonly jid: JID;
   private readonly password: string;
+  private readonly domain: string;
   private ws: WebSocket | null = null;
-  private url: string = "";
+  private url?: string;
   status: Status = Status.DISCONNECTED;
   /** 流特性 */
   streamFeatures: Set<string> = new Set();
   entityCaps?: Capabilities;
-  clientFirstMessageBare?: string;
+  private readonly sasl: SaslData = {};
   resource = "xmppjs.uig48";
   constructor(jid: JID, password: string) {
     super();
     this.jid = jid;
+    this.domain = jid.domain;
     this.resource = jid.resource ?? Math.random().toString(32).slice(2, 8);
     this.password = password;
   }
 
-  connect(url: string) {
+  connect(url?: string) {
+    if (url){
       this.url = url;
-      this.ws = new WS(url, "xmpp");
-      log.debug("connecting", url);
-      this.ws.onopen = (ev) => this.onOpen(ev);
-      this.ws.onclose = (ev) => this.onClose(ev);
-      this.ws.onmessage = (ev) => this.onMessage(ev);
-      this.ws.onerror = (ev) => this.onError(ev);
-      return Promise.resolve();
+    }
+    if (!this.url) throw Error("缺少url")
+    this.ws = new WS(this.url, "xmpp");
+    log.debug("connecting", url);
+    this.ws.onopen = (ev) => this.onOpen(ev);
+    this.ws.onclose = (ev) => this.onClose(ev);
+    this.ws.onmessage = (ev) => this.onMessage(ev);
+    this.ws.onerror = (ev) => this.onError(ev);
+    return Promise.resolve();
   }
 
   send(data: Element | string) {
@@ -98,7 +99,7 @@ export class WSConnection extends EventEmitter {
     }
 
     if (!this.ws) {
-      throw new Error("未连接到服务器");
+      throw new XMPPError(xml, "未连接到服务器");
       // 1 表示连接已经建立
     } else if (this.ws.readyState !== 1) {
       log.debug("send", data);
@@ -156,29 +157,41 @@ export class WSConnection extends EventEmitter {
     // 发送xmpp流的xml
     // 获取当前的域
     this.status = Status.CONNECTED;
-    const domain = new URL(this.url).hostname;
-    const openXML = `<open to="${domain}" version="1.0" xmlns="urn:ietf:params:xml:ns:xmpp-framing"/>`;
+    const openXML = `<open to="${this.domain}" version="1.0" xmlns="urn:ietf:params:xml:ns:xmpp-framing"/>`;
     this.send(openXML);
     this.status = Status.STREAM_START;
   }
 
   onClose(ev: WebSocket.CloseEvent) {
-    this.status = Status.DISCONNECTED;
+    // this.ws = null;
+    if (this.status !== Status.SESSIONEND) {
+      this.status = Status.SESSIONEND;
+      log.info("发出会话结束事件");
+      this.emit("session:end");
+    }
     // 移除事件
-    this.removeAllListeners();
-    this.emit("disconnect", ev);
+    // this.removeAllListeners();
+    this.status = Status.DISCONNECTED;
     log.debug("ws连接close", ev.code, ev.reason);
+    this.emit("disconnect", ev);
   }
 
   onMessage(ev: WebSocket.MessageEvent) {
-    // log.debug("message", ev.data);
-    if (this.status < Status.SESSIONSTART) {
+    log.debug("revice", ev.data);
+    if (this.status < Status.BINDED) {
       // 如果还没有开始会话，就准备会话
+      if ((ev.data as string).includes("stream:features")) {
+        this.parseStreamFeatures(ev.data as string);
+      }
       this.prepareSession(ev.data as string);
 
       this.emit("net:message", ev.data as string);
     } else {
       // 如果已经开始会话，就直接触发事件
+      if ((ev.data as string).includes("stream:features")) {
+        this.parseStreamFeatures(ev.data as string);
+        this.emit("stream:negotiated");
+      }
       this.emit("net:message", ev.data as string);
     }
   }
@@ -187,24 +200,25 @@ export class WSConnection extends EventEmitter {
     log.error("error", ev);
   }
 
-    /**
+  /**
    * 解析流特性
    */
-    private parseStreamFeatures(data: string) {
-      const features = domParser.parseFromString(data, "text/xml")
-          .documentElement!;
-      for (const feature of features.childNodes) {
-          if (feature.namespaceURI) {
-              this.streamFeatures.add(feature.namespaceURI);
-              if (feature.namespaceURI === EntityCaps.NS) {
-                  this.entityCaps = EntityCaps.parseCaps(feature as Element);
-              }
-          }
+  private parseStreamFeatures(data: string) {
+    const features = domParser.parseFromString(data, "text/xml")
+      .documentElement!;
+    for (const feature of features.childNodes) {
+      if (feature.namespaceURI) {
+        this.streamFeatures.add(feature.namespaceURI);
+        if (feature.namespaceURI === EntityCaps.NS) {
+          this.entityCaps = EntityCaps.parseCaps(feature as Element).cap;
+        }
       }
+    }
   }
-  
+
   private async prepareSession(data: string) {
     if (this.status === Status.STREAM_START) {
+      log.info("建立流");
       // 发送open标签在onOpen中，这里接收open标签证明已经建立了xmpp流
       if (data.includes("urn:ietf:params:xml:ns:xmpp-framing")) {
         // 开始会话
@@ -215,182 +229,161 @@ export class WSConnection extends EventEmitter {
     if (this.status === Status.STREAM_ESTABLISHED) {
       if (
         data.includes("stream:features") &&
-        data.includes("http://etherx.jabber.org/streams")
+        data.includes("urn:ietf:params:xml:ns:xmpp-sasl")
       ) {
         // 开始认证
-        const xml = domParser.parseFromString(data, "text/xml").documentElement!;
+        const xml = domParser.parseFromString(data, "text/xml")
+          .documentElement!;
         // 获取所有的 mechanism 元素
         const mechanisms = xml.getElementsByTagName("mechanism");
 
         /* 安全等级映射 */
         const securityLevels = {
-          "X-OAUTH2": 1, // 最低安全性
-          PLAIN: 2, // 中等安全性
-          "SCRAM-SHA-1": 3, // 最高安全性
+          PLAIN: 1, // 中等安全性
+          "SCRAM-SHA-1": 2, // 最高安全性
         } as const;
         // 提取机制名称并排序
         const supportedMechanisms = Array.from(mechanisms)
           .map((mechanism) => mechanism.textContent)
           .sort(
             (a, b) =>
-              (securityLevels[a as keyof typeof securityLevels] ?? 0) -
-              (securityLevels[b as keyof typeof securityLevels] ?? 0)
-          );
+              (securityLevels[b as keyof typeof securityLevels] ?? 0) -
+              (securityLevels[a as keyof typeof securityLevels] ?? 0)
+          ) as Array<keyof typeof securityLevels>;
+        // 选择最高安全等级的机制
+        const selectedMechanism = supportedMechanisms[0];
+        if (!selectedMechanism) throw new Error("不受支持的认证机制");
 
-        // 选择PLAIN
-        const selectedMechanism = "PLAIN";
-        log.debug("selectedMechanism", selectedMechanism);
-        const auth = btoa(`\0${this.jid.node}\0${this.password}`);
-        log.debug("auth", auth);
-        const authXML = `<auth mechanism="${selectedMechanism}" xmlns="urn:ietf:params:xml:ns:xmpp-sasl">${auth}</auth>`;
-        this.send(authXML);
-        this.status = Status.AUTHENTICATING;
-      }
-      return;
-    }
-    if (this.status === Status.AUTHENTICATING) {
-      // log.debug("challenge", data)
-      if (data.includes("challenge")) {
-        const challenge = domParser.parseFromString(
-          data,
-          "text/xml"
-        ).documentElement!;
-        const serverFirstMessage = challenge.textContent;
-        // 解析base64成字符串
-        const serverFirstMessageStr = Buffer.from(
-          serverFirstMessage!,
-          "base64"
-        ).toString();
-
-        log.debug("serverFirstMessage", serverFirstMessage);
-        const parsed = scramParseChallenge(serverFirstMessageStr);
-        if (!parsed) {
-          throw new Error("解析失败");
+        this.sasl.mechanism = selectedMechanism;
+        if (selectedMechanism === "PLAIN") {
+          this.plainAuth(data);
+        } else {
+          this.scramAuth(data);
         }
-        // 生成客户端响应
-        const { nonce, salt, iter } = parsed;
-        const { ck, sk } = await scramDeriveKeys(
+      }
+    }
+    if (this.status < Status.BINDED) {
+      if (this.sasl.mechanism === "PLAIN") {
+        this.plainAuth(data);
+      } else {
+        this.scramAuth(data);
+      }
+    }
+    if (this.status === Status.AUTHENTICATED) {
+      this.bindResource(data);
+    }
+  }
+
+  private async scramAuth(data: string) {
+    log.info(data, this.status);
+    if (this.status === Status.STREAM_ESTABLISHED) {
+      this.sasl.clientFirstMessageBare = `n=${
+        this.jid.node
+      },r=${generateSecureNonce()}`;
+      const auth = `<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='SCRAM-SHA-1'>${btoa(
+        `n,,${this.sasl.clientFirstMessageBare}`
+      )}</auth>`;
+      this.send(auth);
+      this.status = Status.AUTHENTICATING;
+    } else if (this.status === Status.AUTHENTICATING) {
+      log.debug("scramAuth", data);
+      if (data.includes("challenge")) {
+        const challenge = domParser.parseFromString(data, "text/xml")
+          .documentElement!;
+        const serverFirstMessage = challenge.textContent!;
+        const { clientResponse, serverProof } = await scramResponse(
           this.password,
-          salt,
-          iter,
-          "SHA-1",
-          160
+          serverFirstMessage,
+          this.sasl.clientFirstMessageBare!,
+          this.sasl.mechanism as "SCRAM-SHA-1"
         );
-        const clientFinalMessageBare = `c=biws,r=${nonce}`;
-        const authMessage = `${this.clientFirstMessageBare},${serverFirstMessage},${clientFinalMessageBare}`;
-        log.debug("authMessage", authMessage);
-        const clientProof = await scramClientProof(authMessage, ck, "SHA-1");
-        // 将 ArrayBuffer 转换为 base64 字符串
-        const proofBase64 = Buffer.from(clientProof).toString("base64");
-        const clientFinalMessage = `${clientFinalMessageBare},p=${proofBase64}`;
+        this.sasl.serverProof = serverProof;
+
         // 发送响应
-        const responseXML = `<response xmlns="urn:ietf:params:xml:ns:xmpp-sasl">${Buffer.from(
-          clientFinalMessage
-        ).toString("base64")}</response>`;
+        const responseXML = `<response xmlns="urn:ietf:params:xml:ns:xmpp-sasl">${clientResponse}</response>`;
         this.send(responseXML);
       } else if (data.includes("success")) {
         // 认证成功
         this.status = Status.AUTHENTICATED;
-        // 重新发送open标签
-        const domain = new URL(this.url).hostname;
-        const openXML = `<open to="${domain}" version="1.0" xmlns="urn:ietf:params:xml:ns:xmpp-framing"/>`;
-        this.send(openXML);
-        // 发送流的结束标签
-        log.debug(data);
-      }
-      return;
-    }
-    if (this.status === Status.AUTHENTICATED) {
-      if (data.includes("stream:features")) {
-        const xml = `<iq id="_bind_auth_2" type="set" xmlns="jabber:client" to="${this.jid.domain}"><bind xmlns="urn:ietf:params:xml:ns:xmpp-bind"><resource>${this.resource}</resource></bind></iq>`;
-        const xmlElement = domParser.parseFromString(
-          xml,
-          "text/xml"
-        ).documentElement!;
-        this.sendAsync(xmlElement).then((response) => {
-          // 获取jid标签的connentText
-          const jid = response.getElementsByTagName("jid")[0].textContent;
-          if (jid === `${this.jid}${this.resource}`) {
-            log.debug("绑定成功", `${this.jid}${this.resource}`);
-            // log.debug()
-            this.emit("binded");
-            this.status = Status.BINDED;
+        const xml = domParser.parseFromString(data, "text/xml")
+          .documentElement!;
+        const v = atob(xml.textContent!).split("v=")[1];
+        if (!v) throw new Error("无法解析服务器签名");
+        log.debug("v", v);
 
-            // 发送在线状态，开始接受消息，由connection类完成
-          } else {
-            log.error("绑定失败", jid);
-          }
-        });
+        if (v !== this.sasl.serverProof) {
+          log.debug(this.sasl.serverProof);
+          // 关闭连接
+          this.disconnect();
+          throw new Error("服务器签名不匹配");
+        }
+        log.info("认证成功");
+        this.status = Status.AUTHENTICATED;
+        this.emit("authenticated");
+        // 重新开始xmpp流
+        const openXML = `<open to="${this.domain}" version="1.0" xmlns="urn:ietf:params:xml:ns:xmpp-framing"/>`;
+        this.send(openXML);
+      } else if (data.includes("failure")) {
+        this.status = Status.AUTHFAIL;
+        this.disconnect();
+        throw new Error("认证失败");
       }
     }
   }
 
-  // /**
-  //  * 添加响应监听器
-  //  * @param filter 过滤条件，包括 `id` 和 `tagName`
-  //  * @param callback 响应回调函数，当接收到符合条件的响应时调用
-  //  * @param option 可选对象，包含 `once` 属性，表示是否只触发一次
-  //  */
-  // private responseListener(
-  //   filter: { id?: string; tagName?: "message" | "iq" | "presence" },
-  //   callback: (response: Element) => void,
-  //   option: { once: boolean } = { once: false }
-  // ) {
-  //   // 用于监听响应，返回相应的响应
-  //   // 使用 EventEmitter 触发事件
-  //   const eventName = `xmpp:${filter.id ?? "*"}:${filter.tagName ?? "*"}`;
-  //   const handler = (ev: MessageEvent) => {
-  //     try {
-  //       const response = domParser.parseFromString(
-  //         ev.data,
-  //         "text/xml"
-  //       ).documentElement;
-  //       const resId = response.getAttribute("id");
-  //       const resTagName = response.tagName;
+  private plainAuth(data: string) {
+    if (this.status === Status.STREAM_ESTABLISHED) {
+      const auth = `<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>${btoa(
+        `\x00${this.jid.node}\x00${this.password}`
+      )}</auth>`;
+      this.send(auth);
+      this.status = Status.AUTHENTICATING;
+    } else if (this.status === Status.AUTHENTICATING) {
+      if (data.includes("success")) {
+        this.status = Status.AUTHENTICATED;
+        log.info("认证成功");
+        this.emit("authenticated");
+        // 重新开始xmpp流
+        const openXML = `<open to="${this.domain}" version="1.0" xmlns="urn:ietf:params:xml:ns:xmpp-framing"/>`;
+        this.send(openXML);
+      } else if (data.includes("failure")) {
+        this.status = Status.AUTHFAIL;
+        this.disconnect();
+        throw new Error("认证失败");
+      }
+    }
+  }
 
-  //       const idMatch = filter.id ? resId === filter.id : true;
-  //       const tagMatch = filter.tagName ? resTagName === filter.tagName : true;
+  private bindResource(data: string) {
+    if (
+      data.includes("urn:ietf:params:xml:ns:xmpp-bind") &&
+      this.status === Status.AUTHENTICATED
+    ) {
+      this.status = Status.BINDING;
+      const bind = `<iq type='set' id='bind-resource' to="${this.jid.domain}"><bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'><resource>${this.resource}</resource></bind></iq>`;
+      const bindEL = domParser.parseFromString(bind, "text/xml")
+        .documentElement!;
+      log.info("开始绑定资源");
+      this.sendAsync(bindEL).then((response) => {
+        // 获取jid标签的connentText
+        const jid = response.getElementsByTagName("jid")[0].textContent;
+        if (jid === `${this.jid.bare}/${this.resource}`) {
+          log.info("资源绑定成功", jid);
+          this.emit("binded");
+          this.status = Status.BINDED;
 
-  //       if (idMatch && tagMatch) {
-  //         // 发出事件
-  //         this.emit(eventName, response);
-  //       }
-  //     } catch (error) {
-  //       log.error("解析 XML 失败");
-  //       this.ws!.removeEventListener("message", handler);
-  //     }
-  //   };
-  //   // 添加WS事件监听器
-  //   this.ws!.addEventListener("message", handler);
-  //   // 添加EventEmitter监听器
-  //   if (option.once) {
-  //     this.once(eventName, callback);
-  //   } else {
-  //     this.on(eventName, callback);
-  //   }
-  // }
-
-  // /**
-  //  * 移除响应监听器
-  //  * @param filter 过滤条件，包括 `id` 和 `tagName`
-  //  * @param callback 响应回调函数，当接收到符合条件的响应时调用
-  //  */
-  // private removeResponseListener(
-  //   filter: { id?: string; tagName?: "message" | "iq" | "presence" },
-  //   callback: (response: Element) => void
-  // ) {
-  //   // 构造事件名称，与 responseListener 中的格式保持一致
-  //   const eventName = `xmpp:${filter.id ?? "*"}:${filter.tagName ?? "*"}`;
-
-  //   // 移除 EventEmitter 监听器
-  //   this.off(eventName, callback);
-  // }
+          // 发送在线状态，开始接受消息，由connection类完成
+        } else {
+          log.error("绑定失败", jid);
+        }
+      });
+    }
+  }
 
   /** 关闭ws连接 */
   private close() {
     if (this.ws) {
       this.ws.close();
-      this.ws = null;
     }
   }
 
@@ -401,7 +394,6 @@ export class WSConnection extends EventEmitter {
     this.send(closeXML);
     // 关闭ws连接
     this.close();
-    this.ws = null;
     log.debug("关闭连接");
   }
 }

@@ -301,16 +301,17 @@ export class Connection extends EventEmitter {
   }
 
   connect() {
-    if (this.protocol !== "xmpp" && !this.url && !this.XEP0156) {
+    console.log(this.XEP0156);
+    if (this.protocol !== "xmpp" && !this.url && !this.pendingPlugins.has("XEP0156")) {
       throw new Error("未指定 url");
-    } else if (this.protocol !== "xmpp" && !this.url && this.XEP0156) {
+    } else if (this.protocol !== "xmpp" && !this.url && this.pendingPlugins.has("XEP0156")) {
       log.debug("存在插件，尝试使用XEP0156插件获取url");
-      this.XEP0156.init()?.then(() => {
-        this.socket = this.createSocket() as WSConnection;
-        // 初始化插件
-        this.initPlugins();
-        this.socket.connect(this.url!);
-        this._setupSocketEvents();
+      
+      this.socket = this.createSocket() as WSConnection;
+      this._setupSocketEvents();
+      this.initPlugins();
+      this.XEP0156!.init()?.then(() => {
+        this.socket!.connect(this.url!);
       });
     } else {
       this.socket = this.createSocket() as XMPPConnection;

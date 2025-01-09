@@ -1,12 +1,13 @@
 import { Connection } from "../../connection";
 import { Plugin } from "../types";
-import { discoverAltXMPP } from "./discoverAltXMPP";
+import { XMPPDiscoverer } from "./discoverAltXMPP";
 import logger from "@/log";
 const log = logger.getLogger("XEP0156");
-class XEP0156 implements Plugin {
+class XEP0156 extends XMPPDiscoverer implements Plugin {
   readonly name = "XEP-0156: Discovering Alternative XMPP Connection Methods";
   readonly connection: Connection;
   constructor(connection: Connection) {
+    super()
     this.connection = connection;
   }
 
@@ -26,7 +27,7 @@ class XEP0156 implements Plugin {
       return;
     }
     // 获取连接方法
-    return discoverAltXMPP(this.connection.jid.domain)
+    return XEP0156.discoverAltXMPP(this.connection.jid.domain)
       .then((result) => {
         let urlStr;
         if (this.connection.protocol == "ws") {
