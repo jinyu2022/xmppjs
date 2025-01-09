@@ -40,3 +40,10 @@ export enum Status {
     /** 会话结束 */
     SESSIONEND = 43,
 }
+
+export interface SaslData {
+    mechanism?: "PLAIN" | "SCRAM-SHA-1";
+    clientFirstMessageBare?: string;
+    authMessage?: string;
+    serverProof?: string;
+}

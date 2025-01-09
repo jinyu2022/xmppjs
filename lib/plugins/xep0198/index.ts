@@ -73,7 +73,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
             }
         });
         this.connection.on("session:end", ()=>{
-
+            log.info("1312465465断了")
             if (!this.isEnable) return log.info('未启用流管理，无需恢复');
             // 获取所有注册的 disconnect 事件监听器
             const listeners = this.connection.listeners("disconnect");
@@ -82,7 +82,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
             // 重新连接
             try {
                 log.info('重新连接');
-                this.connection.socket!.connect(this.connection.url!).then(() =>{
+                this.connection.socket!.connect().then(() =>{
                     this.connection.socket!.once("authenticated", () => {
                         this.connection.socket!.status = Status.RECONNECTING;
                     })
@@ -201,7 +201,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
                             `服务器返回的处理的数量与本地不一致，local:${this.outbound
                             }, server:${xml.getAttribute("h")}`
                         );
-                        // this.outbound = parseInt(xml.getAttribute("h")!);
+                        this.outbound = parseInt(xml.getAttribute("h")!);
                         //TODO: 重新发送未确认的消息
                     }
                     log.info("恢复成功");

@@ -23,6 +23,10 @@ export default class XEP0115 extends EntityCaps implements Plugin {
             return stanza; 
         });
 
+        this.connection.on("presence", (presence) => {
+            // TODO: 通过ver查找文件中对应的实体能力，然后加入到discos中
+        });
+
         this.connection.once("connect", async () => {
             const identities  = this.connection.XEP0030!.identities;
             const features = [...this.connection.XEP0030!.features];

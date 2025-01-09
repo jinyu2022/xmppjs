@@ -1,10 +1,22 @@
 import Connection from "./connection";
 import { JID } from "./JID";
+import { plugins } from "./plugins";
+import { PluginConstructor } from "./plugins/types";
 import { Options } from "./types";
 import { Message } from "@/stanza";
 export class Client extends Connection {
   constructor(jid: string, password: string, options: Options) {
     super(jid, password, options);
+  }
+
+
+  /**
+   * 注册默认插件
+   */
+  registerDefaultPlugins() {
+    for (const plugin of Object.keys(plugins)) {
+      super.registerPlugin(plugin as keyof typeof plugins);
+    }
   }
 
   /**
@@ -24,7 +36,7 @@ export class Client extends Connection {
    * @param body - 消息内容
    * @throws 超时或者发送失败时抛出异常
    */
-  postMessage(to: JID | string, body: string, type = "normal") {
+  postMsg(to: JID | string, body: string, type = "normal") {
     const msg = Message.createMessage(to, body, type);
     return this.sendAsync(msg.documentElement!, 1000);
   }

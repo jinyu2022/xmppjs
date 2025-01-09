@@ -4,18 +4,12 @@ import { resolveXMPPSrv, EndpointInfo } from "../dns";
 import { domParser, xmlSerializer } from "@/shims";
 import { XMPPError, TimeoutError } from "@/errors";
 import { EntityCaps, Capabilities } from "@/plugins/xep0115/entityCaps";
-import { Status } from "./typing";
+import { Status, SaslData } from "./typing";
 import { EventEmitter } from "events";
 import { JID } from "../JID";
 import { scramResponse, generateSecureNonce } from "../auth/scram";
 import logger from "@/log";
 const log = logger.getLogger("tcp");
-interface SaslData {
-    mechanism?: "PLAIN" | "SCRAM-SHA-1";
-    clientFirstMessageBare?: string;
-    authMessage?: string;
-    serverProof?: string;
-}
 // 定义所有可能的事件参数类型
 interface SocketEventMap {
     connect: void;
@@ -153,7 +147,7 @@ export class XMPPConnection extends EventEmitter {
                 log.info("发出会话结束事件");
             }
             // 移除所有监听器
-            this.removeAllListeners();
+            // this.removeAllListeners();
             this.socket?.removeAllListeners();
             this.status = Status.DISCONNECTED;
             this.emit("disconnect");
@@ -176,13 +170,9 @@ export class XMPPConnection extends EventEmitter {
                         this.streamFeatures.add(feature.namespaceURI);
                     }
                 }
-                this.emit("stream:negotiated");
+                // this.emit("stream:negotiated");
             }
             this.bindResource(data);
-            // TIP: 一定要先发送事件，避免监听到<stream:features>，xmldom无法解析
-            // }
-            // else if (this.status < Status.BINDED){
-            //     this.emit("net:message", data);
         } else {
             if (data.includes("</stream:features>")) {
                 // 获取所有特性
@@ -445,6 +435,7 @@ export class XMPPConnection extends EventEmitter {
             });
         }
     }
+
     disconnect() {
         // 发送关闭流的xml
         const closeXML = `</stream:stream>`;
@@ -459,7 +450,7 @@ export class XMPPConnection extends EventEmitter {
         this.socket?.end();
         this.socket?.destroy();
         log.info("关闭tcp连接");
-        this.socket = null;
+        // this.socket = null;
     }
 }
 
