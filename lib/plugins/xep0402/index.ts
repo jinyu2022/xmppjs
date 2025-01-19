@@ -5,6 +5,10 @@ import type { Plugin } from "../types";
 import { XMPPError } from "@/errors";
 import type { Conference } from "./bookmarks";
 const log = logger.getLogger("XEP0402");
+/**
+ * XEP-0402: PEP Native Bookmarks 插件实现
+ * version: 1.2.0 (2024-08-15);;
+ */
 export default class XEP0402 extends Bookmarks implements Plugin {
     static readonly name = "XEP-0402: PEP Native Bookmarks";
     static readonly dependencies = ["XEP0030", "XEP0163"] as const;

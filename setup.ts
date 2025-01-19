@@ -1,1 +1,1 @@
-global.DOMParser = require('xmldom').DOMParser;
+// global.DOMParser = require('xmldom').DOMParser;

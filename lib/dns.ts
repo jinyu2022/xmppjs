@@ -64,16 +64,21 @@ function sortBySrvPriority(records: SrvRecord[]): SrvRecord[] {
     });
 }
 
-/** 查询并排序 SRV 记录 */
-export async function resolveXMPPSrv(domain: string, tls: boolean): Promise<EndpointInfo[]> {
-    log.debug(`Resolving SRV records for ${domain} (TLS: ${tls})`);
+/**
+ * 查询并排序 SRV 记录
+ * @param domain 域名
+ * @param xmpps 是否查询 xmpps
+ * @returns 
+ */
+export async function resolveXMPPSrv(domain: string, xmpps: boolean): Promise<EndpointInfo[]> {
+    log.debug(`Resolving SRV records for ${domain} (TLS: ${xmpps})`);
     let hostname;
-    if (tls) {
+    if (xmpps) {
         hostname = `_xmpps-client._tcp.${domain}`;
     } else {
         hostname = `_xmpp-client._tcp.${domain}`;
     }
-    try {
+    // try {
         const resolver = new dns.Resolver({ timeout: 1000, tries: 2 });
         const records = await resolver.resolveSrv(hostname);
         // 按优先级和权重排序，然后转换为 EndpointInfo 数组
@@ -81,9 +86,10 @@ export async function resolveXMPPSrv(domain: string, tls: boolean): Promise<Endp
             host: record.name,
             port: record.port
         }));
-    } catch (error) {
-        log.error(`获取SRV记录失败，尝试DoH: ${domain}`, error);
-        const endpoints = await DoH.resolveSrv(hostname);
-        return endpoints;
-    }
+    // }
+    // catch (error) {
+    //     log.error(`获取SRV记录失败，尝试DoH: ${domain}`, error);
+    //     const endpoints = await DoH.resolveSrv(hostname);
+    //     return endpoints;
+    // }
 }

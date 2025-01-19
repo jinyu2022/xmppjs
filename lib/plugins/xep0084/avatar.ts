@@ -19,7 +19,7 @@ export class Avatar {
     /** 浏览器环境 */
     private static async browserImageParser(image: File) {
         const base64Data = await new Promise<string>((resolve) => {
-            //@ts-expect-error
+            //@ts-expect-error 浏览器专用api
             const reader = new FileReader();
             reader.onload = () => resolve((reader.result as string).split(",")[1]);
             reader.readAsDataURL(image);
@@ -34,7 +34,7 @@ export class Avatar {
             );
 
         const metadata = await new Promise<AvatarMetadata>((resolve) => {
-            //@ts-expect-error
+            //@ts-expect-error 浏览器专用api
             const img = new Image();
             img.onload = () => {
                 resolve({
@@ -64,44 +64,39 @@ export class Avatar {
             webp: "image/webp",
             svg: "image/svg+xml",
         } as const;
-        try {
-            const { readFile, stat } = require("fs/promises");
-            // 获取文件信息和内容
-            const [fileStats, fileBuffer] = await Promise.all([
-                stat(imagePath),
-                readFile(imagePath),
-            ]);
+        const { readFile, stat } = await import("fs/promises");
+        // 获取文件信息和内容
+        const [fileStats, fileBuffer] = await Promise.all([
+            stat(imagePath),
+            readFile(imagePath),
+        ]);
 
-            const sizeOf = require("image-size");
-            const dimensions = sizeOf(imagePath);
-            // @ts-expect-error
-            const mimeType = IMAGE_TYPES[dimensions.type];
-            if (!mimeType) {
-                throw new Error(`不支持的图片类型: ${dimensions.type}`);
-            }
-
-            const base64Data = fileBuffer.toString("base64");
-            const sha1 = await crypto.subtle
-                .digest("SHA-1", new TextEncoder().encode(base64Data))
-                .then((hash) =>
-                    Array.from(new Uint8Array(hash))
-                        .map((b) => b.toString(16).padStart(2, "0"))
-                        .join("")
-                );
-
-            return {
-                base64Data,
-                metadata: {
-                    id: sha1,
-                    type: mimeType,
-                    bytes: fileStats.size,
-                    width: dimensions.width,
-                    height: dimensions.height,
-                },
-            };
-        } catch (error: any) {
-            throw new Error(`解析图片失败: ${error.message}`);
+        const { imageSize } = await import("image-size");
+        const dimensions = imageSize(imagePath);
+        const mimeType = IMAGE_TYPES[dimensions.type as keyof typeof IMAGE_TYPES];
+        if (!mimeType) {
+            throw new Error(`不支持的图片类型: ${dimensions.type}`);
         }
+
+        const base64Data = fileBuffer.toString("base64");
+        const sha1 = await crypto.subtle
+            .digest("SHA-1", new TextEncoder().encode(base64Data))
+            .then((hash) =>
+                Array.from(new Uint8Array(hash))
+                    .map((b) => b.toString(16).padStart(2, "0"))
+                    .join("")
+            );
+
+        return {
+            base64Data,
+            metadata: {
+                id: sha1,
+                type: mimeType,
+                bytes: fileStats.size,
+                width: dimensions.width,
+                height: dimensions.height,
+            },
+        };
     }
 
     //TODO: 允许使用http上传头像，并在info中包含url
@@ -115,15 +110,12 @@ export class Avatar {
         let metadata: AvatarMetadata;
         if (
             typeof img === "string" &&
-            typeof require !== "undefined" &&
-            typeof require("fs") !== "undefined"
+            typeof require !== "undefined"
         ) {
-            const meta = await Avatar.nodeImageParser(
-                img
-            );
+            const meta = await Avatar.nodeImageParser(img);
             base64Data = meta.base64Data;
             metadata = meta.metadata;
-            //@ts-expect-error
+            //@ts-expect-error 没有加载DOM类型库，ts识别不出window
         } else if (img instanceof File && typeof window !== "undefined") {
             const { base64Data: data, metadata: meta } =
                 await Avatar.browserImageParser(img);

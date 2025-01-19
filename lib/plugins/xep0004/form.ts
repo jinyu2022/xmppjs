@@ -5,7 +5,7 @@ import { domParser, implementation } from "../../shims";
 type FormType = "cancel" | "form" | "result" | "submit";
 
 // 字段类型定义
-type FieldType =
+export type FieldType =
     | "boolean"
     | "fixed"
     | "hidden"
@@ -99,7 +99,7 @@ export class Form {
             options: Array.from(field.getElementsByTagName("option")).map(
                 (option) => ({
                     label: option.getAttribute("label") ?? undefined,
-                    value: option.getElementsByTagName("value")[0]?.textContent!,
+                    value: option.getElementsByTagName("value")[0].textContent!,
                 })
             ),
         }));

@@ -1,24 +1,22 @@
 {
-  "name": "vite-project",
+  "name": "xmppjs",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "files": [
-    "dist",
+    "lib",
     "index.d.ts"
   ],
-  "main": "./dist/counter.umd.cjs",
-  "module": "./dist/counter.js",
-  "types": "./index.d.ts",
+  "main": "./dist/lib/index.js",
   "exports": {
-    "types": "./index.d.ts",
-    "import": "./dist/counter.js",
-    "require": "./dist/counter.umd.cjs"
+    "import": "./dist/lib/index.js"
   },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "bulid-no-tsc": "vite build",
     "ts-check": "tsc --noEmit",
+    "ts-build": "tsc",
     "test": "vitest"
   },
   "devDependencies": {
@@ -36,6 +34,7 @@
   },
   "optionalDependencies": {
     "@xmldom/xmldom": "^0.9.6",
+    "events": "^3.3.0",
     "image-size": "^1.2.0",
     "ws": "^8.18.0"
   }

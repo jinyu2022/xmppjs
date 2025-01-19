@@ -6,7 +6,7 @@ import { JID } from "./JID";
 import logger from "./log";
 import { Message, Iq, Presence, StanzaBase } from "./stanza";
 import WSConnection from "./transport/websocket";
-import XMPPConnection from "./transport/tcp";
+import type XMPPConnection from "./transport/tcp";
 import type { Protocol, Options } from "./types";
 
 const log = logger.getLogger("connection");
@@ -57,7 +57,8 @@ export interface SocketEventMap {
   // [key: string | symbol]: unknown;
 }
 // 扩展 EventEmitter 类型定义
-export interface Connection extends EventEmitter {
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
+export interface Connection extends PluginRegistry {
   on<E extends keyof SocketEventMap>(
     event: E,
     listener: (arg: SocketEventMap[E]) => void
@@ -82,8 +83,8 @@ export interface Connection extends EventEmitter {
 //   [K in keyof PluginRegistry]: InstanceType<(typeof plugins)[K]>;
 // };
 // 2. 声明合并
-export interface Connection extends PluginRegistry {}
-
+// export interface Connection extends PluginRegistry {}
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class Connection extends EventEmitter {
   jid: JID;
   password: string;
@@ -150,7 +151,7 @@ export class Connection extends EventEmitter {
       this.protocol = options.protocol;
     }
     if (options?.host) {
-      this.address = options.host;
+      this.host = options.host;
     } else {
       log.debug("未指定service，将尝试从域名获取");
     }
@@ -244,7 +245,7 @@ export class Connection extends EventEmitter {
     }
     // 使用Proxy创建错误处理器
     // HACK: 如果要卸载我不得不忽略readonly属性
-    // @ts-expect-error
+    // @ts-expect-error 仅仅是为了在运行时提醒你插件已卸载
     this[name] = new Proxy(
       {},
       {
@@ -300,35 +301,35 @@ export class Connection extends EventEmitter {
     log.info(`注册拦截器 ${type}`);
   }
 
-  connect() {
+  async connect() {
     console.log(this.XEP0156);
     if (this.protocol !== "xmpp" && !this.url && !this.pendingPlugins.has("XEP0156")) {
       throw new Error("未指定 url");
     } else if (this.protocol !== "xmpp" && !this.url && this.pendingPlugins.has("XEP0156")) {
       log.debug("存在插件，尝试使用XEP0156插件获取url");
       
-      this.socket = this.createSocket() as WSConnection;
+      this.socket = await this.createSocket() as WSConnection;
       this._setupSocketEvents();
       this.initPlugins();
-      this.XEP0156!.init()?.then(() => {
-        this.socket!.connect(this.url!);
-      });
+      await this.XEP0156!.init();
+      this.socket.connect(this.url);
     } else {
-      this.socket = this.createSocket() as XMPPConnection;
+      this.socket = await this.createSocket() as XMPPConnection;
       this.initPlugins();
       this.socket.connect(this.url);
       this._setupSocketEvents();
     }
-    // this.emit("connected");
   }
 
-  private createSocket() {
-    if (this.protocol === "ws") {
+  private async createSocket() {
+    if (this.protocol === "ws" && typeof WebSocket !== "undefined") {
+      const WSConnection = (await import("./transport/websocket")).default;
       return new WSConnection(this.jid, this.password);
     } else if (this.protocol === "http") {
       throw new Error("暂不支持xbosh");
-    } else if (this.protocol === "xmpp") {
+    } else if (this.protocol === "xmpp" && typeof process !== "undefined") {
       log.info("使用xmpp协议");
+      const XMPPConnection = (await import("./transport/tcp")).default;
       return new XMPPConnection(this.jid, this.password);
     } else {
       throw new Error("未知的协议");
@@ -345,20 +346,21 @@ export class Connection extends EventEmitter {
       log.info("连接已建立");
       this.emit("connect");
     });
-    this.socket.once("disconnect", () => {
-      log.info("连接已关闭");
-      this.emit("disconnect")
-      // this.socket = null;
-    });
-    this.socket.on("net:message", (message) => this.onMessage(message));
     this.socket.once("binded", () => {
       this.emit("session:start");
     });
     this.socket.once("session:end", () => {
       log.info("会话结束");
       this.emit("session:end")
-
-    })
+    });
+    const msgHandler = (message: string) => this.onMessage(message)
+    this.socket.on("net:message", msgHandler);
+    this.socket.once("disconnect", () => {
+      log.info("连接已关闭");
+      this.socket?.off("net:message", msgHandler);
+      this.emit("disconnect")
+      // this.socket = null;
+    });
   }
 
   disconnect() {
@@ -448,21 +450,30 @@ export class Connection extends EventEmitter {
    * @param obj stanza对象
    * @returns 返回obj
    */
-  private traverseAndTransform(obj: Record<string, unknown>) {
-    // HACK：使用 instanceof Element 我无法做到同时兼容浏览器和node环境
+  private traverseAndTransform(obj: Record<string, unknown>, visited = new Set()) {
+    if (!obj || typeof obj !== 'object' || visited.has(obj)) {
+      return obj;
+    }
+    visited.add(obj); 
+
+    if (typeof Element === 'undefined' && typeof process !== "undefined") {
+      // @ts-expect-error 仅在node环境下使用
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      global.Element = require("xmldom").Element;
+    }
+
     for (const [key, value] of Object.entries(obj)) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      if (this.stanzaPlugins.has((value as Element).namespaceURI ?? "")) {
+      if (value instanceof Element && this.stanzaPlugins.has(value.namespaceURI ?? "")) {
         const handler = this.stanzaPlugins.get(
-          (value as Element).namespaceURI!
+          value.namespaceURI!
         )!;
-        const transformed = handler(value as Element);
-        this.traverseAndTransform(transformed);
+        const transformed = handler(value);
+        this.traverseAndTransform(transformed, visited);
         // 重新赋值
         delete obj[key];
         Object.assign(obj, transformed);
-      } else {
-        this.traverseAndTransform(value as Record<string, unknown>);
+      } else if (value && Object.getPrototypeOf(obj) === Object.prototype) {
+        this.traverseAndTransform(value as Record<string, unknown>, visited);
       }
     }
     return obj;
@@ -630,18 +641,6 @@ export class Connection extends EventEmitter {
     return this.sendAsync(iq);
   }
 
-  getRoster() {
-    return this.RFC6121!.getRoster();
-  }
-
-  setRoster(jid: string, name?: string, group?: string) {
-    return this.RFC6121!.setRoster(jid, name, group);
-  }
-
-  removeRoster(jid: string) {
-    return this.RFC6121!.removeRoster(jid);
-  }
-
   /**
    * 一次性消息节监听处理器
    * @param id 消息id
@@ -703,6 +702,7 @@ export class Connection extends EventEmitter {
 
 import { plugins } from "../lib/plugins/index";
 import type { PluginConstructor } from "./plugins/types";
+import { Element } from "@xmldom/xmldom";
 
 type PluginRegistry = {
   [K in keyof typeof plugins]?: InstanceType<(typeof plugins)[K]>;
