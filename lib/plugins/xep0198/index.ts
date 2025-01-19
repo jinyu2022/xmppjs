@@ -1,7 +1,7 @@
 import { StreamManagement } from "./streamManagement";
 import type { Plugin } from "../types";
 import type Connection from "@/connection";
-import { domParser, xmlSerializer } from "@/shims";
+import { xmlSerializer } from "@/shims";
 import { StanzaBase } from "@/stanza";
 import { TimeoutError, XMPPError } from "@/errors";
 import { Status } from "@/transport/typing";
@@ -9,7 +9,11 @@ import logger from "@/log";
 const log = logger.getLogger("XEP0198");
 
 // 声明属性
-
+enum StreamStatus {
+    DISABLE = 0,
+    ENABLE_SENT = 1,
+    ENABLE = 2,
+}
 /**
  * XEP-0198 Stream Management 插件实现
  * 用于确保XMPP消息的可靠传输和会话恢复
@@ -23,11 +27,11 @@ export default class XEP0198 extends StreamManagement implements Plugin {
     /** 发送的stanza数量，也是服务端接收处理的stanza数量 */
     private outbound: number = 0;
     /** 接受的stanza数量 */
-    private inbound: number = -1;
+    private inbound: number = 0;
     /** 请求确认的消息间隔数 */
-    private interval = 5;
-    /** 是否启用流管理 */
-    private isEnable = false;
+    private readonly interval = 5;
+    /** 流管理状态 */
+    private status: StreamStatus = StreamStatus.DISABLE;
     /** 最大恢复时间(秒) */
     private max = 300;
     /** 会话恢复ID */
@@ -41,7 +45,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
     init() {
         log.info('初始化 XEP-0198 Stream Management 插件');
         this.connection.registerInterceptor("send", (stanza) => {
-            if (["iq", "message", "presence"].includes(stanza.tagName)) {
+            if (this.status >= StreamStatus.ENABLE_SENT && ["iq", "message", "presence"].includes(stanza.tagName)) {
                 this.outbound++;
                 log.info(`发送消息${xmlSerializer.serializeToString(stanza)}，当前发送数量：${this.outbound}`);
                 // 确认已经发送后再检查
@@ -49,11 +53,11 @@ export default class XEP0198 extends StreamManagement implements Plugin {
             }
             return stanza;
         });
-        
+
         this.connection.registerInterceptor("receive", (stanza) => {
-            if (["iq", "message", "presence"].includes(stanza.tagName)) {
+            if (this.status >= StreamStatus.ENABLE && ["iq", "message", "presence"].includes(stanza.tagName)) {
                 this.inbound++;
-            // log.info(`接收消息${stanza.tagName}，当前接收数量：${this.inbound}`);
+                // log.info(`接收消息${stanza.tagName}，当前接收数量：${this.inbound}`);
             }
             return stanza;
         });
@@ -65,16 +69,15 @@ export default class XEP0198 extends StreamManagement implements Plugin {
             }
         });
 
-        this.connection.socket!.once("binded", () => { 
+        this.connection.socket!.once("binded", () => {
             if (this.connection.socket!.streamFeatures.has(XEP0198.NS)) {
-                this.enable()
-            }else {
+                this.enable();
+            } else {
                 log.warn('服务器不支持流管理');
             }
         });
-        this.connection.on("session:end", ()=>{
-            log.info("1312465465断了")
-            if (!this.isEnable) return log.info('未启用流管理，无需恢复');
+        this.connection.on("session:end", () => {
+            if (this.status < StreamStatus.ENABLE) return log.info('未启用流管理，无需恢复');
             // 获取所有注册的 disconnect 事件监听器
             const listeners = this.connection.listeners("disconnect");
             // 清除所有 disconnect 事件监听器
@@ -82,24 +85,25 @@ export default class XEP0198 extends StreamManagement implements Plugin {
             // 重新连接
             try {
                 log.info('重新连接');
-                this.connection.socket!.connect().then(() =>{
+                this.connection.socket!.connect().then(() => {
                     this.connection.socket!.once("authenticated", () => {
                         this.connection.socket!.status = Status.RECONNECTING;
-                    })
+                    });
                     this.connection.socket!.once("stream:negotiated", () => {
                         log.info('重新连接成功');
                         this.resume();
                     });
                     this.connection._setupSocketEvents();
                 });
-            }catch(e){
+            } catch (e) {
                 log.error('重连失败', e);
+                this.status = StreamStatus.DISABLE;
                 // 触发所有 disconnect 事件监听器
                 for (const listener of listeners) {
                     listener();
                 }
             }
-        })
+        });
     }
 
     bindHandler() {
@@ -137,7 +141,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
                         this.location = xml.getAttribute("location")!;
                         log.info(`服务器位置: ${this.location}`);
                     }
-                    this.isEnable = true;
+                    this.status = StreamStatus.ENABLE;
                     log.info("启用流管理成功");
                     resolve(response.xml);
                 }
@@ -153,6 +157,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
             }, 30_000);
 
             this.connection.send(`<enable xmlns='${XEP0198.NS}' resume='true'/>`);
+            this.status = StreamStatus.ENABLE_SENT;
         });
     }
 
@@ -161,22 +166,22 @@ export default class XEP0198 extends StreamManagement implements Plugin {
      * 当发送消息数量达到interval的整数倍时触发
      */
     requestAckAndCheck() {
-        if (!this.isEnable) return;
+        if (this.status < StreamStatus.ENABLE) return;
         if (this.outbound !== 0 && this.outbound % this.interval === 0) {
             log.info("发送确认请求，当前数量", this.outbound);
             this.requestAck()
-            .then((h) => {
-                if (parseInt(h) !== this.outbound) {
-                log.warn(
-                    `服务器返回的处理的数量与本地不一致，local:${this.outbound}, server:${h}`
-                );
-                // this.outbound = parseInt(h);
-                }
-                log.info("请求确认成功");
-            })
-            .catch((error) => {
-                log.error(`请求确认失败: ${error}`);
-            });
+                .then((h) => {
+                    if (parseInt(h) !== this.outbound) {
+                        log.warn(
+                            `服务器返回的处理的数量与本地不一致，local:${this.outbound}, server:${h}`
+                        );
+                        // this.outbound = parseInt(h);
+                    }
+                    log.info("请求确认成功");
+                })
+                .catch((error) => {
+                    log.error(`请求确认失败: ${error}`);
+                });
         }
     }
 

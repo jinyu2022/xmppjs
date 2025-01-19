@@ -5,18 +5,20 @@
     "module": "ESNext",
     "lib": ["ES2020", "DOM.Iterable"],
     "skipLibCheck": true,
+    "outDir": "./dist",
+    "baseUrl": ".",
     "paths": {
       "@/*": ["./lib/*"]
     },
 
     /* Bundler mode */
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
+    // "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleDetection": "force",
     "allowJs": true,
     "checkJs": true,
-    "noEmit": true,
+    // "noEmit": true,
 
     /* Linting */
     "strict": true,
@@ -26,5 +28,6 @@
     "noUncheckedSideEffectImports": true,
 
   },
-  "include": ["src", "lib"],
+  "include": ["lib"],
+  // "exclude": ["node_modules", "lib/test/*"]
 }

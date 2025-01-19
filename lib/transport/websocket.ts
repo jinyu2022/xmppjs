@@ -26,7 +26,8 @@ interface SocketEventMap {
 }
 
 // 扩展 EventEmitter 类型定义
-export interface WSConnection extends EventEmitter {
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
+export interface WSConnection {
   on<E extends keyof SocketEventMap>(
     event: E,
     listener: (arg: SocketEventMap[E]) => void
@@ -51,6 +52,7 @@ export interface WSConnection extends EventEmitter {
   // on(event: string | symbol, listener: (...args: any[]) => void): this;
   // emit(event: string | symbol, ...args: any[]): boolean;
 }
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class WSConnection extends EventEmitter {
   private readonly jid: JID;
   private readonly password: string;
@@ -178,14 +180,14 @@ export class WSConnection extends EventEmitter {
 
   onMessage(ev: WebSocket.MessageEvent) {
     log.debug("revice", ev.data);
-    if (this.status < Status.BINDED) {
+    if (this.status < Status.BINDING) {
       // 如果还没有开始会话，就准备会话
       if ((ev.data as string).includes("stream:features")) {
         this.parseStreamFeatures(ev.data as string);
       }
       this.prepareSession(ev.data as string);
 
-      this.emit("net:message", ev.data as string);
+      // this.emit("net:message", ev.data as string);
     } else {
       // 如果已经开始会话，就直接触发事件
       if ((ev.data as string).includes("stream:features")) {

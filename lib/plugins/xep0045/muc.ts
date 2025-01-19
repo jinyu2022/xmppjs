@@ -319,10 +319,11 @@ export class MUC {
   }
 
   /**
-   * 解析NS为muc#user的presence
+   * 解析NS为muc#user的presence  
+   * message节也可能有muc#user，但只是标识，不包含具体信息，直接返回空对象
    * @param presence
    */
-  static parsePresUser(xEl: Element): { muc: MUCUserPres } | { muc: {} } {
+  static parsePresUser(xEl: Element): Record<"muc", MUCUserPres> | Record<"muc", Record<never, never>> {
     // message节也可能有muc#user，但只是标识，不包含具体信息，直接返回空对象
     if (!xEl.hasChildNodes()) return { muc: {} };
 

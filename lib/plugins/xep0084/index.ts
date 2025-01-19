@@ -4,7 +4,10 @@ import type Connection from "@/connection";
 import { XMPPError } from "@/errors";
 import type { Plugin } from "../types";
 import type { JID } from "@/JID";
-
+/**
+ * XEP-0084: User Avatar 插件实现
+ * version: 1.1.4 (2019-09-20)
+ */
 export class XEP0084 extends Avatar implements Plugin {
     static readonly name = "XEP-0084: User Avatar";
     static readonly dependencies = ["XEP0030"] as const;
@@ -17,7 +20,7 @@ export class XEP0084 extends Avatar implements Plugin {
     }
 
     init() {
-        this.connection.XEP0030!.addItem(this.connection.jid.bare, XEP0084.NS.metadata);
+        this.connection.XEP0030!.addItem(this.connection.jid.bare, XEP0084.NS.data);
         this.connection.XEP0030!.addItem(this.connection.jid.bare, XEP0084.NS.metadata);
         this.connection.registerStanzaPlugin(
             XEP0084.NS.metadata,

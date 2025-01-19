@@ -26,8 +26,8 @@ interface SocketEventMap {
     binded: void;
     [event: string | symbol]: unknown;
 }
-
-export interface XMPPConnection extends EventEmitter {
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
+interface XMPPConnection {
     on<E extends keyof SocketEventMap>(
         event: E,
         listener: (arg: SocketEventMap[E]) => void
@@ -49,7 +49,8 @@ export interface XMPPConnection extends EventEmitter {
  * XMPP连接类
  * 处理与XMPP服务器的TCP/TLS连接
  */
-export class XMPPConnection extends EventEmitter {
+// eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
+class XMPPConnection extends EventEmitter {
     private readonly jid: JID;
     private readonly password: string;
     private readonly resource: string;
@@ -94,7 +95,7 @@ export class XMPPConnection extends EventEmitter {
             this.port = endpoint.port.toString();
         }
 
-        let options = {
+        const options = {
             host: this.host,
             port: parseInt(this.port),
             timeout: 30000,
