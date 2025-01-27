@@ -1,8 +1,12 @@
 import type Connection from "@/connection";
 import type { Plugin } from "../types";
 import { Nickname } from "./nickname";
+
+/**
+ * XEP-0172: User Nickname
+ * version: 1.1 (2012-03-21)
+ */
 class XEP0172 extends Nickname implements Plugin {
-    static readonly name = "XEP-0172: User Nickname";
     static readonly dependencies = ["XEP0030"] as const;
 
     readonly connection: Connection;
@@ -21,9 +25,19 @@ class XEP0172 extends Nickname implements Plugin {
             }
         })
     }
+
+    async retrieveNick(jid: string) {
+        const iq = XEP0172.createRetrieveNickIq(jid);
+        const res = await this.connection.sendAsync(iq);
+        if (res.getAttribute("type") === "error" )
+            throw new XMPPError(res, "获取头像失败")
+        const nickEL = res.getElementsByTagNameNS(XEP0172.NS, "nick")[0]
+        return nickEL.textContent
+    }
 }
 
 import type { Message } from "@/stanza";
+import { XMPPError } from "@/errors";
 declare module "@/stanza" {
     interface Message {
         nick?: string;

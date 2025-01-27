@@ -34,7 +34,7 @@ export class Nickname {
 
     /**
      * 创建发布昵称的iq
-     * @nick 昵称
+     * @param nick 昵称
      */
     static createNickPublishIq(nick: string) {
         const publishDoc = implementation.createDocument(null, "publish", null);
@@ -48,6 +48,13 @@ export class Nickname {
         return PEP.createPublishIq(publish);
     }
 
+    /**
+     * 创建获取昵称的iq
+     * 
+     */
+    static createRetrieveNickIq(jid: string) {
+        return PEP.createRetrieveItemsIq(jid, Nickname.NS, 1);
+    }
     //不打算支持回退到0060
 
 }

@@ -67,7 +67,7 @@ export class XEP0084 extends Avatar implements Plugin {
         const iq = PEP.createRetrieveItemsIq(jid, XEP0084.NS.data, 1, metadata.id);
         const res = await this.connection.sendAsync(iq);
         if (res.getAttribute("type") === "error")
-            throw new XMPPError(res, "获取头像元数据失败");
+            throw new XMPPError(res, "获取头像数据失败");
 
         const dataEl = res.getElementsByTagNameNS(XEP0084.NS.data, "data")[0];
         return {

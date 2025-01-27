@@ -1,10 +1,10 @@
 import type { Connection } from "@/connection";
-import type { plugins } from "@/plugins";
+import { plugins } from "@/plugins";
 
 /** 实例接口 */
 interface PluginInstance {
     /** Connection 类只会自动加载依赖，而不会检查服务器的支持情况。*/
-    readonly dependencies?: never;
+    dependencies?: never;
     readonly connection?: Connection;
     /** 在这里执行初始化，依赖检查等 */
     init(): void;

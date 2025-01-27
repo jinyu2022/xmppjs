@@ -5,10 +5,10 @@ import { XMPPError, TimeoutError } from "./errors";
 import { JID } from "./JID";
 import logger from "./log";
 import { Message, Iq, Presence, StanzaBase } from "./stanza";
-import WSConnection from "./transport/websocket";
+import type WSConnection from "./transport/websocket";
 import type XMPPConnection from "./transport/tcp";
 import type { Protocol, Options } from "./types";
-
+import { Element as E } from "@xmldom/xmldom";
 const log = logger.getLogger("connection");
 
 interface StanzaHandlerMap {
@@ -17,14 +17,6 @@ interface StanzaHandlerMap {
   presence: (presence: Presence) => void;
   others: (other: StanzaBase) => void;
 }
-
-// type StanzaPlugins = {
-//   [K in keyof StanzaHandlerMap]: StanzaHandlerMap[K][];
-// };
-
-// type StanzaPlugins = {
-
-// }
 
 interface EventHandlerMap {
   message: (message: Message) => boolean;
@@ -37,12 +29,7 @@ interface EventPluginMap<K extends keyof EventHandlerMap> {
   eventName: keyof SocketEventMap;
   matcher: EventHandlerMap[K];
 }
-interface StanzaInstanceMap {
-  message: Message;
-  iq: Iq;
-  presence: Presence;
-  others: StanzaBase;
-}
+
 // 定义所有可能的事件参数类型
 export interface SocketEventMap {
   stanza: Element;
@@ -79,11 +66,7 @@ export interface Connection extends PluginRegistry {
     arg?: SocketEventMap[E]
   ): boolean;
 }
-// type PluginTypes = {
-//   [K in keyof PluginRegistry]: InstanceType<(typeof plugins)[K]>;
-// };
-// 2. 声明合并
-// export interface Connection extends PluginRegistry {}
+// 声明合并
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 export class Connection extends EventEmitter {
   jid: JID;
@@ -100,6 +83,8 @@ export class Connection extends EventEmitter {
   url?: string;
   /** 是否启用tls，在本地调试的时候您可能不需要，默认为true */
   tls = true;
+  /** xml缓冲区 */
+  xmlBuffer = "";
   /**
    * 当前的连接实例
    * @warrning 你要知道你自己在做什么
@@ -303,18 +288,26 @@ export class Connection extends EventEmitter {
 
   async connect() {
     console.log(this.XEP0156);
-    if (this.protocol !== "xmpp" && !this.url && !this.pendingPlugins.has("XEP0156")) {
+    if (
+      this.protocol !== "xmpp" &&
+      !this.url &&
+      !this.pendingPlugins.has("XEP0156")
+    ) {
       throw new Error("未指定 url");
-    } else if (this.protocol !== "xmpp" && !this.url && this.pendingPlugins.has("XEP0156")) {
+    } else if (
+      this.protocol !== "xmpp" &&
+      !this.url &&
+      this.pendingPlugins.has("XEP0156")
+    ) {
       log.debug("存在插件，尝试使用XEP0156插件获取url");
-      
-      this.socket = await this.createSocket() as WSConnection;
+
+      this.socket = (await this.createSocket()) as WSConnection;
       this._setupSocketEvents();
       this.initPlugins();
       await this.XEP0156!.init();
       this.socket.connect(this.url);
     } else {
-      this.socket = await this.createSocket() as XMPPConnection;
+      this.socket = (await this.createSocket()) as XMPPConnection;
       this.initPlugins();
       this.socket.connect(this.url);
       this._setupSocketEvents();
@@ -351,14 +344,14 @@ export class Connection extends EventEmitter {
     });
     this.socket.once("session:end", () => {
       log.info("会话结束");
-      this.emit("session:end")
+      this.emit("session:end");
     });
-    const msgHandler = (message: string) => this.onMessage(message)
+    const msgHandler = (message: string) => this.onMessage(message);
     this.socket.on("net:message", msgHandler);
     this.socket.once("disconnect", () => {
       log.info("连接已关闭");
       this.socket?.off("net:message", msgHandler);
-      this.emit("disconnect")
+      this.emit("disconnect");
       // this.socket = null;
     });
   }
@@ -380,11 +373,26 @@ export class Connection extends EventEmitter {
   private onMessage(message: string) {
     log.debug("receive", message);
 
+    // const xml = this.concatenateToXml(message);
+    const xml = message;
+    if (!xml) return;
     let stanza: Element;
     try {
-      stanza = domParser.parseFromString(message, "text/xml").documentElement!;
+      stanza = domParser.parseFromString(xml, "text/xml").documentElement!;
+      if (stanza.getElementsByTagName("parsererror").length > 0) {
+        throw new Error("这不是一个该有的xml！");
+      }
     } catch (e) {
-      log.error("解析失败", e, message);
+      if (
+        e instanceof Error &&
+        (e.message.includes("unclosed xml tag") ||
+          e.message.includes("missing root element") ||
+          e.message.includes("Unexpected content outside root element"))
+      ) {
+        this.concatenateToXml(xml);
+      } else {
+        log.error("解析失败", e, xml);
+      }
       return;
     }
     // 拦截器
@@ -400,6 +408,94 @@ export class Connection extends EventEmitter {
     this.emit(tagName, stanzaInstance);
   }
 
+  /**
+   * 拼接xml片段
+   * @param xml xml片段
+   * @returns 如果是一个完整的xml片段，返回完整xml，否则返回undefined
+   */
+  private concatenateToXml(xml: string) {
+    // 第一个xml片段肯定以<或?开头，否则就是一个错误的xml
+    if (
+      this.xmlBuffer.length === 0 &&
+      (!xml.startsWith("<") || !xml.startsWith("?"))
+    )
+      throw new Error(`未知的xml片段：${xml}`);
+
+    this.xmlBuffer += xml;
+
+    // 更简单的正则表达式，只匹配标签的开始和结束
+    const tagRegex = /<([^>]+)>/g; // 匹配 <...> 结构
+    const stack: string[] = [];
+    let match;
+
+    while ((match = tagRegex.exec(this.xmlBuffer)) !== null) {
+      const tagContent = match[1]; // 提取 < 和 > 之间的内容 (不包括 <>)
+      // const fullTag = match[0]; // 完整的标签字符串，包括 <>
+
+      // XML 声明/处理指令检查
+      if (tagContent.startsWith("?")) {
+        continue; // 忽略 XML 声明 <?xml ... ?>
+      }
+      // 注释检查
+      if (tagContent.startsWith("!--")) {
+        if (tagContent.endsWith("--")) {
+          continue; // 忽略完整注释 <!-- ... -->
+        } else {
+          // 不完整注释，等待后续数据
+          break;
+        }
+      }
+      // CDATA 检查
+      if (tagContent.startsWith("![CDATA[")) {
+        if (tagContent.endsWith("]]")) {
+          continue; // 忽略完整 CDATA <![CDATA[ ... ]]>
+        } else {
+          // 不完整 CDATA，等待后续数据
+          break;
+        }
+      }
+      // 自闭合标签检查
+      if (tagContent.endsWith("/")) {
+        continue; // 忽略自闭合标签 <tag/> 或 <tag .../>
+      }
+
+      // 结束标签检查
+      if (tagContent.startsWith("/")) {
+        const tagName = tagContent.substring(1).trim(); // 提取结束标签名
+        if (stack.length > 0 && stack[stack.length - 1] === tagName) {
+          stack.pop(); // 栈顶标签匹配，出栈
+        } else {
+          log.warn(
+            `XML标签不匹配: 结束标签 '${tagName}' 找不到匹配的开始标签`,
+            this.xmlBuffer
+          );
+          this.xmlBuffer = "";
+          return;
+        }
+      }
+      // 开始标签检查
+      else {
+        const tagName = tagContent.trim().split(" ")[0]; // 提取开始标签名 (忽略属性)
+        stack.push(tagName); // 开始标签入栈
+      }
+    }
+
+    if (stack.length === 0 && this.xmlBuffer.trim().length > 0) {
+      const result = this.xmlBuffer.trim();
+      this.xmlBuffer = "";
+      // 返回完整的 XML 片段
+      this.onMessage(result);
+      return result;
+    }
+
+    // 防止缓冲区过大
+    if (this.xmlBuffer.length > 1024_000) {
+      log.warn("xml片段过大，可能是一个错误的xml，清空缓冲区");
+      this.xmlBuffer = "";
+    }
+
+    return;
+  }
   private stanzaInstanceFactory(stanza: Element) {
     const tagName = ["message", "iq", "presence"].includes(stanza.tagName)
       ? (stanza.tagName as keyof StanzaHandlerMap)
@@ -412,7 +508,7 @@ export class Connection extends EventEmitter {
       this.traverseAndTransform(stanzaInstance);
       for (const eventPlugin of this.eventPlugins[tagName]) {
         if (eventPlugin.matcher(stanzaInstance)) {
-          this.emit(eventPlugin.eventName, stanzaInstance);
+          this.emit(tagName, stanzaInstance);
         }
       }
     } else if (tagName === "iq") {
@@ -420,7 +516,7 @@ export class Connection extends EventEmitter {
       this.traverseAndTransform(stanzaInstance);
       for (const eventPlugin of this.eventPlugins[tagName]) {
         if (eventPlugin.matcher(stanzaInstance)) {
-          this.emit(eventPlugin.eventName, stanzaInstance);
+          this.emit(tagName, stanzaInstance);
         }
       }
     } else if (tagName === "presence") {
@@ -428,7 +524,7 @@ export class Connection extends EventEmitter {
       this.traverseAndTransform(stanzaInstance);
       for (const eventPlugin of this.eventPlugins[tagName]) {
         if (eventPlugin.matcher(stanzaInstance)) {
-          this.emit(eventPlugin.eventName, stanzaInstance);
+          this.emit(tagName, stanzaInstance);
         }
       }
     } else {
@@ -436,7 +532,7 @@ export class Connection extends EventEmitter {
       this.traverseAndTransform(stanzaInstance);
       for (const eventPlugin of this.eventPlugins[tagName]) {
         if (eventPlugin.matcher(stanzaInstance)) {
-          this.emit(eventPlugin.eventName, stanzaInstance);
+          this.emit("others", stanzaInstance);
         }
       }
     }
@@ -450,23 +546,26 @@ export class Connection extends EventEmitter {
    * @param obj stanza对象
    * @returns 返回obj
    */
-  private traverseAndTransform(obj: Record<string, unknown>, visited = new Set()) {
-    if (!obj || typeof obj !== 'object' || visited.has(obj)) {
+  private traverseAndTransform(
+    obj: Record<string, unknown>,
+    visited = new Set()
+  ) {
+    if (!obj || typeof obj !== "object" || visited.has(obj)) {
       return obj;
     }
-    visited.add(obj); 
+    visited.add(obj);
 
-    if (typeof Element === 'undefined' && typeof process !== "undefined") {
-      // @ts-expect-error 仅在node环境下使用
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      global.Element = require("xmldom").Element;
+    if (typeof Element === "undefined") {
+      // @ts-expect-error 没有定义Element
+      globalThis.Element = E;
     }
 
     for (const [key, value] of Object.entries(obj)) {
-      if (value instanceof Element && this.stanzaPlugins.has(value.namespaceURI ?? "")) {
-        const handler = this.stanzaPlugins.get(
-          value.namespaceURI!
-        )!;
+      if (
+        value instanceof Element &&
+        this.stanzaPlugins.has(value.namespaceURI ?? "")
+      ) {
+        const handler = this.stanzaPlugins.get(value.namespaceURI!)!;
         const transformed = handler(value);
         this.traverseAndTransform(transformed, visited);
         // 重新赋值
@@ -559,9 +658,11 @@ export class Connection extends EventEmitter {
     // }
     if (!this.socket) throw new Error("未连接");
     const id = stanza.getAttribute("id")!;
-    const tagName = (["message", "iq", "presence"].includes(stanza.tagName)
-      ? (stanza.tagName)
-      : "others") as "message" | "iq" | "presence" | "others";
+    const tagName = (
+      ["message", "iq", "presence"].includes(stanza.tagName)
+        ? stanza.tagName
+        : "others"
+    ) as "message" | "iq" | "presence" | "others";
     return new Promise<Element>((resolve, reject) => {
       const handler = (response: StanzaBase) => {
         if (response.id === id) {
@@ -703,6 +804,7 @@ export class Connection extends EventEmitter {
 import { plugins } from "../lib/plugins/index";
 import type { PluginConstructor } from "./plugins/types";
 import { Element } from "@xmldom/xmldom";
+import { error } from "console";
 
 type PluginRegistry = {
   [K in keyof typeof plugins]?: InstanceType<(typeof plugins)[K]>;

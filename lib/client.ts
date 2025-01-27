@@ -53,4 +53,12 @@ export class Client extends Connection {
   removeRoster(jid: string) {
     return this.RFC6121!.removeRoster(jid);
   }
+
+  setPresence(){
+    this.send(
+      '<presence>'+
+        '<show>chat</show>'+
+      '</presence>'
+    )
+  }
 }

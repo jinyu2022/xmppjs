@@ -1,4 +1,4 @@
-export interface transport {
+export interface Transport {
     /** 发送数据 */
     send(data: string): void;
     /** 关闭连接 */

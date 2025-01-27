@@ -141,6 +141,7 @@ export class Message extends StanzaBase {
     this.type = type;
     this.subject = subject;
     this.body = body;
+    // 将其余子节点添加到实例上
     for (const [key, value] of Object.entries(children)) {
       this[key] = value;
     }
@@ -151,7 +152,7 @@ export class Message extends StanzaBase {
     {
       to: string | null;
       from: string | null;
-      type: 'normal' | 'chat' | 'groupchat' | 'error';
+      type: "normal" | "chat" | "groupchat" | "error";
       subject: string | null;
       body: string | null;
       [key: string]: Element | string | null;
@@ -161,7 +162,6 @@ export class Message extends StanzaBase {
     const to = message.getAttribute("to");
     const from = message.getAttribute("from");
     const type = (message.getAttribute("type") ?? "normal") as MsgType;
-    log.debug("type", message.getAttribute("type"));
     // 查找直接子节点subject
     const subjectEl = Array.from(message.childNodes).filter(
       (child) =>
@@ -195,8 +195,12 @@ export class Message extends StanzaBase {
     };
   }
 
-  static createMessage(to: JID|string, body: string, type = "normal") {
-    const message = implementation.createDocument("jabber:client", "message", null);
+  static createMessage(to: JID | string, body: string, type = "normal") {
+    const message = implementation.createDocument(
+      "jabber:client",
+      "message",
+      null
+    );
     message.documentElement!.setAttribute("to", to.toString());
     message.documentElement!.setAttribute("type", type);
     const bodyEl = message.createElement("body");
@@ -213,12 +217,19 @@ export class Presence extends StanzaBase {
   readonly status?: string | null;
   constructor(stanza: Element, connection: Connection) {
     super(stanza, connection);
-    this.type = stanza.getAttribute("type");
-    this.show = stanza.getElementsByTagName("show")[0]?.textContent as presShow;
-    this.status = stanza.getElementsByTagName("status")[0]?.textContent;
+    const { type, show, status, ...children } =
+      Presence.parsePresence(stanza).presence;
+    this.type = type;
+    this.show = show;
+    this.status = status;
+    // 将其余子节点添加到实例上
+    for (const [key, value] of Object.entries(children)) {
+      this[key] = value;
+    }
   }
 
   static parsePresence(presence: Element) {
+    // const presence
     const to = presence.getAttribute("to");
     const from = presence.getAttribute("from");
     const type = presence.getAttribute("type");
@@ -226,12 +237,15 @@ export class Presence extends StanzaBase {
       ?.textContent as presShow;
     const status = presence.getElementsByTagName("status")[0]?.textContent;
     const childrens = Array.from(presence.childNodes).filter(
-      (child) => child.nodeType === 1
+      (child) =>
+        child.nodeType === 1 &&
+        child.localName !== "show" &&
+        child.localName !== "status"
     );
-    const children = childrens.reduce((acc, child) => {
-      acc[(child as Element).tagName] = child as Element;
-      return acc;
-    }, {} as Record<string, Element>);
+    const children: Record<string, Element> = {};
+    for (const child of childrens) {
+        children[(child as Element).tagName] = child as Element;
+    }
     return {
       presence: {
         to,

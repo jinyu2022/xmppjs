@@ -4,7 +4,7 @@ import { implementation } from "@/shims";
 import { XMPPError } from "@/errors";
 
 type subscription = "none" | "to" | "from" | "both";
-interface Roster {
+export interface Roster {
   approved: boolean;
   jid: string;
   name?: string;

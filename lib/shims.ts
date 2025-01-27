@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type xmldom from '@xmldom/xmldom';
 import type { WebSocket as NodeWebSocket } from 'ws';
 
@@ -7,16 +6,19 @@ const NS_MAP = {
     'stream': 'http://etherx.jabber.org/streams',
 } as const;
 
-function getDOMParser() {
+async function getDOMParser() {
     if (typeof window !== 'undefined' && window.DOMParser) {
         return new DOMParser({xmlns: NS_MAP});
     }
     try {
-        const { DOMParser } = require('@xmldom/xmldom');
+        const { DOMParser } = await import('@xmldom/xmldom');
         return new DOMParser({
             xmlns: NS_MAP,
-            onError: (error) => {
-                console.error('解析错误:', error);
+            onError: (level, message) => {
+                console.error('解析错误:', {
+                    level,
+                    message,
+                });
             }
         });
     } catch (e) {
@@ -24,36 +26,36 @@ function getDOMParser() {
     }
 }
 
-function getImplementation() {
+async function getImplementation() {
     if (typeof window !== 'undefined' && document.implementation) {
         return document.implementation;
     }
     try {
-        const { DOMImplementation } = require('@xmldom/xmldom');
+        const { DOMImplementation } = await import('@xmldom/xmldom');
         return new DOMImplementation();
     } catch (e) {
         throw new Error('DOMImplementation不存在, 请在浏览器环境或者node环境安装xmldom');
     }
 }
 
-function getXmlSerializer() {
+async function getXmlSerializer() {
     if (typeof window !== 'undefined' && window.XMLSerializer) {
         return new XMLSerializer();
     }
     try {
-        const { XMLSerializer } = require('@xmldom/xmldom');
+        const { XMLSerializer } = await import('@xmldom/xmldom');
         return new XMLSerializer();
     } catch (e) {
         throw new Error('XMLSerializer不存在, 请在浏览器环境或者node环境安装xmldom');
     }
 }
 
-function getWebSocket(): typeof NodeWebSocket {
+async function getWebSocket(): Promise<typeof NodeWebSocket> {
     if (typeof window !== 'undefined' && window.WebSocket) {
         return window.WebSocket;
     }
     try {
-        const { WebSocket } = require('ws');
+        const { WebSocket } = await import('ws');
         return WebSocket;
     } catch (e) {
         throw new Error('WebSocket不存在, 请在浏览器环境或者node环境安装ws');
@@ -62,10 +64,10 @@ function getWebSocket(): typeof NodeWebSocket {
 
 // XXX:
 /** 你必须同时兼容web和node的类型 */
-export const domParser: xmldom.DOMParser = getDOMParser();
+export const domParser: xmldom.DOMParser = await getDOMParser();
 /** 你必须同时兼容web和node的类型 */
-export const implementation: xmldom.DOMImplementation = getImplementation();
+export const implementation: xmldom.DOMImplementation = await getImplementation();
 /** 你必须同时兼容web和node的类型 */
-export const xmlSerializer: xmldom.XMLSerializer = getXmlSerializer();
+export const xmlSerializer: xmldom.XMLSerializer = await getXmlSerializer();
 /** 你必须同时兼容web和node的类型 */
-export const WS = getWebSocket();
+export const WS = await getWebSocket();

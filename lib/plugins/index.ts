@@ -13,6 +13,7 @@ import XEP0199 from "./xep0199";
 import XEP0203 from "./xep0203";
 import XEP0280 from "./xep0280";
 import XEP0297 from "./XEP0297";
+import XEP0359 from "./xep0359";
 import XEP0402 from "./xep0402";
 export {
   RFC6121,
@@ -29,6 +30,7 @@ export {
   XEP0203,
   XEP0280,
   XEP0297,
+  XEP0359,
   XEP0402,
 };
 
@@ -48,5 +50,6 @@ export const plugins = {
   XEP0203,
   XEP0280,
   XEP0297,
+  XEP0359,
   XEP0402,
 } as const;
