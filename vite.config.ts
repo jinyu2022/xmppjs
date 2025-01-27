@@ -1,8 +1,15 @@
-// / <reference types="vitest/config" />
-// import { defineConfig } from 'vite'
+/// <reference types="vitest/config" />
+import { defineConfig } from "vite";
 import { resolve, parse } from "path";
-import { defineConfig } from "vitest/config";
+// import { defineConfig } from "vitest/config";
+import dts from "vite-plugin-dts";
 export default defineConfig({
+  plugins: [
+    dts({
+      include: ["lib/**/*.ts", "index.ts"],
+      exclude: ["**/*.test.ts", "**/*.spec.ts"],
+    }),
+  ],
   resolve: {
     alias: {
       "@": resolve(__dirname, "lib"),
@@ -12,35 +19,29 @@ export default defineConfig({
     lib: {
       entry: "./index.ts",
       name: "xmppjs",
-      fileName: () => "main.js",
       formats: ["es"],
     },
+    target: ["es2022", "node20"],
     rollupOptions: {
-      external: ["net", "tls", "dns", "@xmldom/xmldom", "image-size", "ws"],
+      external: [
+        "net",
+        "tls",
+        "dns/promises",
+        "fs/promises",
+        "@xmldom/xmldom",
+        "image-size",
+        "ws",
+        "events",
+        "loglevel",
+        "uuid"
+      ],
       output: {
-        globals: {
-          net: "net",
-          tls: "tls",
-          dns: "dns",
-          "@xmldom/xmldom": "xmldom",
-          "image-size": "image-size",
-          ws: "ws",
-        },
         preserveModules: true,
-        preserveModulesRoot: "lib",
-        entryFileNames: (chunkInfo) => {
-          return `${chunkInfo.name}.js`;
-        },
-        chunkFileNames: (chunkInfo) => {
-          const name = parse(chunkInfo.facadeModuleId || "").name;
-          return `${name}.js`;
-        },
-        dir: "dist/lib",
+        entryFileNames: "[name].js", // 关键配置：保持入口文件名为源文件名
+        chunkFileNames: "[name].js", // 关键配置：保持 chunk 文件名为源文件名 (如果生成 chunk)
+        assetFileNames: "[name].[ext]", // 关键配置：保持 asset 文件名为源文件名 (如果生成 asset)
       },
     },
-  },
-  optimizeDeps: {
-    exclude: ["net", "tls", "dns", "@xmldom/xmldom", "image-size", "ws"], // 确保在优化依赖时排除这些模块
   },
   test: {
     include: ["**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}"],

@@ -1,5 +1,4 @@
 import { PEP } from "../xep0163/pep";
-import { Iq } from "@/stanza";
 import { implementation } from "@/shims";
 import type { JID } from "@/JID";
 export interface Conference {
@@ -8,6 +7,7 @@ export interface Conference {
     nick?: string;
     password?: string;
     extensions?: Element;
+    jid: string;
 }
 
 export class Bookmarks {
@@ -23,8 +23,12 @@ export class Bookmarks {
     static parseBookmarksIq(iq: Element): Conference[] {
         const item = iq.getElementsByTagName("item");
         return Array.from(item).map((item) => {
-            const conference = item.getElementsByTagName("conference")[0];
-            return Bookmarks.pareseConferenceEl(conference).conference;
+            const conferenceEl = item.getElementsByTagName("conference")[0];
+            return {
+                ...Bookmarks.pareseConferenceEl(conferenceEl).conference,
+                // XEP-0402 书签的 JID 是 item 的 id 属性，conference不再包含jid属性
+                jid: item.getAttribute("id")!,
+            };
         });
     }
 
@@ -38,31 +42,40 @@ export class Bookmarks {
             const conference = itemEL.getElementsByTagName("conference")[0];
             const name = conference.getAttribute("name") ?? void 0;
             const autojoin = conference.getAttribute("autojoin") === "true";
-            const nick = conference.getElementsByTagName("nick")[0].textContent ?? void 0;
-            const password = conference.getElementsByTagName("password")[0].textContent ?? void 0;
+            const nick =
+                conference.getElementsByTagName("nick")[0].textContent ?? void 0;
+            const password =
+                conference.getElementsByTagName("password")[0].textContent ?? void 0;
             const extensions = conference.getElementsByTagName("extensions")[0];
             return { jid, name, autojoin, nick, password, extensions };
         });
         return items;
     }
 
-    static pareseConferenceEl(conferenceEl: Element): Record<"conference", Conference> {
-        if (conferenceEl.namespaceURI !== Bookmarks.NS && conferenceEl.tagName !== "conference")
+    static pareseConferenceEl(
+        conferenceEl: Element
+    ): Record<"conference", Omit<Conference, "jid">> {
+        if (
+            conferenceEl.namespaceURI !== Bookmarks.NS &&
+            conferenceEl.tagName !== "conference"
+        )
             throw new Error("不是一个conference元素");
         // const jid = conferenceEl.getAttribute("jid") ?? void 0;
         const name = conferenceEl.getAttribute("name") ?? void 0;
         const autojoin = conferenceEl.getAttribute("autojoin") === "true";
-        const nick = conferenceEl.getElementsByTagName("nick")[0]?.textContent ?? void 0;
-        const password = conferenceEl.getElementsByTagName("password")[0]?.textContent ?? void 0;
+        const nick =
+            conferenceEl.getElementsByTagName("nick")[0]?.textContent ?? void 0;
+        const password =
+            conferenceEl.getElementsByTagName("password")[0]?.textContent ?? void 0;
         const extensions = conferenceEl.getElementsByTagName("extensions")[0];
-        return { "conference": {name, autojoin, nick, password, extensions } };
+        return { conference: { name, autojoin, nick, password, extensions } };
     }
     /**
      * 添加书签就是发布新节点
-     * @param conference 
-     * @returns 
+     * @param conference
+     * @returns
      */
-    static createAddBookmarkIq(conference: Conference & { jid: string }) {
+    static createAddBookmarkIq(conference: Conference & { jid: string; }) {
         const { jid, name, autojoin, nick, password, extensions } = conference;
         const publish = implementation.createDocument(null, "publish", null);
         publish.documentElement!.setAttribute("node", Bookmarks.NS);

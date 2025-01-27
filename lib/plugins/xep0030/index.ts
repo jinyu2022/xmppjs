@@ -46,7 +46,7 @@ export class XEP0030 extends Disco implements Plugin {
         const query = Disco.parseDiscoInfo(res)
         identities = query.identities;
         features = query.features;
-        log.debug("服务器身份特性获取成功");
+        log.info("服务器身份特性获取成功");
       }catch {
         identities = []
         features = []

@@ -15,6 +15,7 @@ export class Pubsub {
         BASE: "http://jabber.org/protocol/pubsub",
         EVENT: "http://jabber.org/protocol/pubsub#event",
     } as const;
+
     /** 构造检索iq
      * @param to 对方jid
      * @param node 节点

@@ -3,9 +3,15 @@ import type Connection from "@/connection";
 import type { Plugin } from "../types";
 import { implementation } from "@/shims"; 
 
+/**
+ * XEP-0184: Message Receipts
+ * version: 1.0.0 (2024-09-24)
+ * @see https://xmpp.org/extensions/xep-0184.html
+ * 
+ * 1. 客户端发送消息时，会自动添加回执请求
+ * 2. 客户端接收到消息时，会自动处理回执请求
+ */
 export default class XEP0184 extends MessageReceips implements Plugin {
-  static readonly name = "XEP-0184: Message Receipts";
-  static readonly version = "1.0.0 (2024-09-24)";
 
   /** XMPP连接实例 */
   readonly connection: Connection;

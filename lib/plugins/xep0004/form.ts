@@ -1,6 +1,5 @@
-import { fileURLToPath } from "url";
-import { domParser, implementation } from "../../shims";
-
+import { implementation } from "../../shims";
+import type { Document } from "@xmldom/xmldom";
 // 表单类型定义
 type FormType = "cancel" | "form" | "result" | "submit";
 
@@ -115,8 +114,8 @@ export class Form {
         );
     }
 
-    private static createFieldEl(field: Field) {
-        const fieldDoc = implementation.createDocument(null, "field", null);
+    private static createFieldEl(field: Field, doc: Document) {
+        const fieldDoc = doc
         const fieldEl = fieldDoc.documentElement!;
         if (field.type) fieldEl.setAttribute("type", field.type);
         if (field.var) fieldEl.setAttribute("var", field.var);
@@ -162,19 +161,19 @@ export class Form {
         if (data.reported) {
             const reported = form.createElement("reported");
             for (const field of data.reported) {
-                reported.appendChild(Form.createFieldEl(field));
+                reported.appendChild(Form.createFieldEl(field, form));
             }
             form.documentElement!.appendChild(reported);
         }
         for (const item of data.items ?? []) {
             const itemEl = form.createElement("item");
             for (const field of item.fields) {
-                itemEl.appendChild(Form.createFieldEl(field));
+                itemEl.appendChild(Form.createFieldEl(field, form));
             }
             form.documentElement!.appendChild(itemEl);
         }
         for (const field of data.fields) {
-            form.documentElement!.appendChild(Form.createFieldEl(field));
+            form.documentElement!.appendChild(Form.createFieldEl(field, form));
         }
         return form.documentElement!;
     }

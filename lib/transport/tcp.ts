@@ -1,6 +1,6 @@
 import { Socket } from "net";
 import { connect as tlsConnect, TLSSocket } from "tls";
-import { resolveXMPPSrv, EndpointInfo } from "../dns";
+import { resolveXMPPSrv } from "../dns";
 import { domParser, xmlSerializer } from "@/shims";
 import { XMPPError, TimeoutError } from "@/errors";
 import { EntityCaps, Capabilities } from "@/plugins/xep0115/entityCaps";
@@ -58,8 +58,6 @@ class XMPPConnection extends EventEmitter {
     private readonly domain: string;
     private host: string;
     private port = "5222";
-    // private endpoints: EndpointInfo[] = []; // 可用的服务器端点列表
-    // private currentEndpoint = 0; // 当前使用的端点索引
     private readonly tls: boolean; // 是否使用TLS
     status = 0; // 连接状态
     /** 流特性 */
@@ -98,6 +96,7 @@ class XMPPConnection extends EventEmitter {
         const options = {
             host: this.host,
             port: parseInt(this.port),
+            keepAlive: true,
             timeout: 30000,
         };
         if (this.tls) {
@@ -106,10 +105,12 @@ class XMPPConnection extends EventEmitter {
                 ALPNProtocols: ["xmpp-client"],
             });
             this.socket = tlsConnect(options);
+            this.socket.setEncoding("utf8");
             // 设置Socket事件监听器
             this.setupSocketListeners();
         } else {
             this.socket = new Socket();
+            this.socket.setEncoding("utf8");
             // 设置Socket事件监听器
             this.setupSocketListeners();
             this.socket.connect(options);
@@ -157,7 +158,7 @@ class XMPPConnection extends EventEmitter {
     }
 
     private onData(data: string) {
-        log.debug("接收", data);
+        // log.debug("接收", data);
         if (this.status < Status.AUTHENTICATED) {
             this.authenticateUser(data);
         } else if (this.status < Status.BINDING) {
@@ -218,7 +219,7 @@ class XMPPConnection extends EventEmitter {
         if (typeof data !== "string") {
             data = xmlSerializer.serializeToString(data);
         }
-        log.debug("发送", data);
+        // log.debug("发送", data);
         try {
             this.socket.write(data);
         } catch (error) {
