@@ -4,18 +4,28 @@ import { MUC, JoinOptions, MUCStatusCode } from "./muc";
 import { XMPPError, TimeoutError } from "@/errors.ts";
 import { XEP0004 } from "../xep0004";
 import { JID } from "@/JID";
-import type { DataForm, Field } from "../xep0004/form";
-import type { MUCItem, MUCUserPres } from "./typing";
+import type { DataForm } from "../xep0004/form";
+import type { MUCUserPres, MUCUser } from "./typing";
 import logger from "@/log";
 const log = logger.getLogger("XEP0045");
-
+/**
+ * XEP-0045: Multi-User Chat
+ * @version 1.35.1 (2024-09-17)
+ */
 export class XEP0045 extends MUC implements Plugin {
-    readonly name = "XEP0045";
     static readonly dependencies = ["XEP0030"] as const;
     readonly connection: Connection;
 
-    /** 存储已加入的房间信息，键是room jid */
-    readonly rooms: Map<string, MUCItem> = new Map();
+    /** 存储已加入的房间信息，键是房间的jid */
+    readonly rooms: Map<string,
+        {
+            /** 自己的昵称 */
+            nick: string;
+            /** 键是用户的roomjid */
+            occupants: Map<string, MUCUser>;
+        }
+    > = new Map();
+
     constructor(connection: Connection) {
         super();
         this.connection = connection;
@@ -70,6 +80,27 @@ export class XEP0045 extends MUC implements Plugin {
                 return Boolean((pers.muc as MUCUserPres<"destroy">)?.destroy);
             },
         });
+
+        this.connection.on("presence", (pres) => {
+            if (!pres.muc?.item) return;
+
+            const room = (pres.from as JID).bare;
+            const userJid = (pres.from as JID).full;
+            const user = {
+                nick: (pres.from as JID).resource!,
+                ...pres.muc.item,
+            };
+            if (pres.type === "unavailable") {
+                if (pres.muc.statuses?.includes(MUCStatusCode.SelfPresence)) {
+                    // 如果是自己离开，删除房间
+                    this.rooms.delete(room);
+                } else {
+                    this.rooms.get(room)!.occupants.delete(userJid);
+                }
+            } else {
+                this.rooms.get(room)!.occupants.set(userJid, user);
+            }
+        });
     }
 
     /**
@@ -92,9 +123,17 @@ export class XEP0045 extends MUC implements Plugin {
         timeout = 300_0000
     ) {
         const pres = XEP0045.createJoinPres(room, nick, options);
+        // 服务器在其他用户的存在广播发送完成后才会返回响应
+        // 所以我需要先把rooms设置好，然后再等待响应
+        this.rooms.set(room.toString(), {
+            nick,
+            occupants: new Map(),
+        });
         const res = await this.connection.sendAsync(pres, timeout);
         // 如果加入失败，服务端会返回一个错误的presence
         if (res.getAttribute("type") === "error") {
+            // 删除rooms
+            this.rooms.delete(room.toString());
             throw new XMPPError(res, "加入房间失败");
         } else if (res.getAttribute("type") === null) {
             // 如果没有返回类型，说明加入成功
@@ -106,6 +145,7 @@ export class XEP0045 extends MUC implements Plugin {
     }
 
     async leave(to: string | JID, reason?: string) {
+        if (!this.rooms.has(to.toString())) throw new Error(`未加入房间${to}`);
         const pres = XEP0045.createLeavePres(to, reason);
         const res = await this.connection.sendAsync(pres);
         if (res.getAttribute("type") === "unavailable") {
@@ -116,6 +156,7 @@ export class XEP0045 extends MUC implements Plugin {
     }
 
     setNick(room: string | JID, nick: string) {
+        if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
         if (typeof room === "string") room = new JID(room);
         if (!this.rooms.has(room.bare)) throw new Error("未加入房间");
         const pres = XEP0045.createSetNickPres(room, nick);
@@ -160,7 +201,13 @@ export class XEP0045 extends MUC implements Plugin {
         });
     }
 
+
+    /**
+     * 请求发言权
+     * @param room 房间jid
+     */
     requestVoice(room: string | JID) {
+        if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
         const pres = XEP0045.createRequestVoiceMsg(room);
         this.connection.send(pres);
     }
@@ -172,6 +219,7 @@ export class XEP0045 extends MUC implements Plugin {
      * @link https://xmpp.org/extensions/xep-0045.html#enter-subject
      */
     async setSubject(room: string | JID, subject: string) {
+        if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
         const msg = XEP0045.createSetSubjectMsg(room, subject);
         const res = await this.connection.sendAsync(msg);
         if (res.getAttribute("type") === "error") {
@@ -188,6 +236,7 @@ export class XEP0045 extends MUC implements Plugin {
      * @param reason 原因
      */
     async kick(room: string | JID, nick: string, reason?: string) {
+        if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
         const iq = XEP0045.createSetRoleIq(room, nick, "none", reason);
         this.connection.sendAsync(iq).then((res) => {
             if (res.getAttribute("type") === "error") {
@@ -199,6 +248,7 @@ export class XEP0045 extends MUC implements Plugin {
     }
 
     async ban(room: string | JID, nick: string, reason?: string) {
+        if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
         const iq = XEP0045.createSetAffiliationIq(room, nick, "outcast", reason);
         this.connection.sendAsync(iq).then((res) => {
             if (res.getAttribute("type") === "error") {
@@ -210,6 +260,7 @@ export class XEP0045 extends MUC implements Plugin {
     }
 
     async getRoomConfig(room: string | JID) {
+        if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
         const iq = XEP0045.createGetRoomConfigIq(room);
         const res = await this.connection.sendAsync(iq);
         if (res.getAttribute("type") === "error") {
@@ -221,6 +272,7 @@ export class XEP0045 extends MUC implements Plugin {
     }
 
     async setRoomConfig(room: string | JID, dataForm: DataForm) {
+        if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
         const iq = XEP0045.createSetRoomConfigIq(room, dataForm);
         const res = await this.connection.sendAsync(iq);
         if (res.getAttribute("type") === "error") {
@@ -323,6 +375,7 @@ declare module "@/stanza" {
         muc?: MUCUserPres<"destroy" | "invite" | "decline">;
     }
 }
+
 declare module "@/connection" {
     interface SocketEventMap {
         "muc:join"?: Presence;

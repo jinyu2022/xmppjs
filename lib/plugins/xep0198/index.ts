@@ -170,14 +170,16 @@ export default class XEP0198 extends StreamManagement implements Plugin {
         if (this.outbound !== 0 && this.outbound % this.interval === 0) {
             log.info("发送确认请求，当前数量", this.outbound);
             this.requestAck()
-                .then((h) => {
-                    if (parseInt(h) !== this.outbound) {
+                .then(([h, outbound]) => {
+                    if (h !== outbound) {
                         log.warn(
-                            `服务器返回的处理的数量与本地不一致，local:${this.outbound}, server:${h}`
+                            `服务器返回的处理的数量与本地不一致，local:${outbound}, server:${h}`
                         );
                         // this.outbound = parseInt(h);
+                    }else{
+                        log.info("请求确认成功");
                     }
-                    log.info("请求确认成功");
+                    
                 })
                 .catch((error) => {
                     log.error(`请求确认失败: ${error}`);
@@ -240,11 +242,11 @@ export default class XEP0198 extends StreamManagement implements Plugin {
 
     /**
      * 发送<r/>标签请求服务器确认
-     * @returns Promise<string> 返回服务器已处理的消息数量
+     * @returns Promise<[h, outbound]> 返回服务器已处理的消息数量
      */
     private requestAck() {
         log.debug(`请求服务器确认，当前发送消息数: ${this.outbound}`);
-        return new Promise<string>((resolve, reject) => {
+        return new Promise<[number, number]>((resolve, reject) => {
             const onResponse = (response: StanzaBase) => {
                 if (
                     response.tagName === "a" &&
@@ -253,12 +255,12 @@ export default class XEP0198 extends StreamManagement implements Plugin {
                     this.connection.off("others", onResponse);
                     log.info("收到确认", response.toString());
                     clearTimeout(timer);
-                    resolve(response.xml.getAttribute("h")!);
+                    resolve([parseInt(response.xml.getAttribute("h")!), this.outbound]);
                 }
             };
 
             // 监听全局事件
-            this.connection.on("others", onResponse);
+            this.connection.prependListener("others", onResponse);
 
             // 处理超时
             const timer = setTimeout(() => {

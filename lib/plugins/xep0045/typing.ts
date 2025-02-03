@@ -43,3 +43,11 @@ export interface MUCActor {
     nick?: string;
     jid?: string;
 }
+
+export interface MUCUser {
+    /** 真实jid */
+    jid?: string;
+    nick: string;
+    affiliation: "none" | "outcast" | "member" | "admin" | "owner";
+    role: "none" | "visitor" | "participant" | "moderator";
+}

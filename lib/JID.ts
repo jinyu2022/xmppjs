@@ -1,22 +1,22 @@
 export class JID {
-  readonly node: string;
+  readonly local: string;
   readonly domain: string;
   readonly resource?: string;
   readonly full: string;
   readonly bare: string;
 
   constructor(jid: string) {
-    const { node, domain, resource } = JID.parse(jid);
+    const { local, domain, resource } = JID.parse(jid);
 
-    this.node = node;
+    this.local = local;
     this.domain = domain;
     this.resource = resource;
-    this.full = `${this.node}@${this.domain}/${this.resource ?? ""}`;
-    this.bare = `${this.node}@${this.domain}`;
+    this.full = `${this.local}@${this.domain}/${this.resource ?? ""}`;
+    this.bare = `${this.local}@${this.domain}`;
   }
 
   static parse(jid: string): {
-    node: string;
+    local: string;
     domain: string;
     resource?: string;
   } {
@@ -27,14 +27,14 @@ export class JID {
       throw new Error(`无效的 JID 格式: ${jid}`);
     }
     // TODO: XEP-0106：JID 转义
-    const node = match[1];
+    const local = match[1];
     const domain = match[2];
-    if (!node || !domain) {
+    if (!local || !domain) {
       throw new Error(`无效的 JID 格式: ${jid}`);
     }
     const resource = match[4];
 
-    return { node, domain, resource };
+    return { local, domain, resource };
   }
 
   equals(other: any): boolean {

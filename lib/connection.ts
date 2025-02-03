@@ -41,7 +41,6 @@ export interface SocketEventMap {
   "session:start": void;
   "session:end": void;
   disconnect: void;
-  // [key: string | symbol]: unknown;
 }
 // 扩展 EventEmitter 类型定义
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
@@ -287,7 +286,6 @@ export class Connection extends EventEmitter {
   }
 
   async connect() {
-    console.log(this.XEP0156);
     if (
       this.protocol !== "xmpp" &&
       !this.url &&
@@ -417,7 +415,7 @@ export class Connection extends EventEmitter {
     // 第一个xml片段肯定以<或?开头，否则就是一个错误的xml
     if (
       this.xmlBuffer.length === 0 &&
-      (!xml.startsWith("<") || !xml.startsWith("?"))
+      (!xml.startsWith("<") && !xml.startsWith("?"))
     )
       throw new Error(`未知的xml片段：${xml}`);
 
@@ -496,6 +494,7 @@ export class Connection extends EventEmitter {
 
     return;
   }
+
   private stanzaInstanceFactory(stanza: Element) {
     const tagName = ["message", "iq", "presence"].includes(stanza.tagName)
       ? (stanza.tagName as keyof StanzaHandlerMap)
@@ -803,8 +802,6 @@ export class Connection extends EventEmitter {
 
 import { plugins } from "../lib/plugins/index";
 import type { PluginConstructor } from "./plugins/types";
-import { Element } from "@xmldom/xmldom";
-import { error } from "console";
 
 type PluginRegistry = {
   [K in keyof typeof plugins]?: InstanceType<(typeof plugins)[K]>;

@@ -20,9 +20,11 @@ interface SocketEventMap {
   "stream:end": void;
   // stanza: { name: string; attrs: Record<string, string>; children: any[] };
   "net:message": string;
+  "stream:negotiated": void;
   "session:start": void;
+  "session:end": void;
   binded: void;
-  [event: string | symbol]: unknown;
+  // [event: string | symbol]: unknown;
 }
 
 // 扩展 EventEmitter 类型定义
@@ -280,7 +282,7 @@ export class WSConnection extends EventEmitter {
     log.info(data, this.status);
     if (this.status === Status.STREAM_ESTABLISHED) {
       this.sasl.clientFirstMessageBare = `n=${
-        this.jid.node
+        this.jid.local
       },r=${generateSecureNonce()}`;
       const auth = `<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='SCRAM-SHA-1'>${btoa(
         `n,,${this.sasl.clientFirstMessageBare}`
@@ -336,7 +338,7 @@ export class WSConnection extends EventEmitter {
   private plainAuth(data: string) {
     if (this.status === Status.STREAM_ESTABLISHED) {
       const auth = `<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>${btoa(
-        `\x00${this.jid.node}\x00${this.password}`
+        `\x00${this.jid.local}\x00${this.password}`
       )}</auth>`;
       this.send(auth);
       this.status = Status.AUTHENTICATING;
