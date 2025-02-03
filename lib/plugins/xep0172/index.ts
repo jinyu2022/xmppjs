@@ -26,6 +26,12 @@ class XEP0172 extends Nickname implements Plugin {
         })
     }
 
+    /**
+     * 检索用户昵称
+     * @param jid 要检索的用户的JID 
+     * @returns 昵称
+     * @throws {XMPPError} 如果检索失败
+     */
     async retrieveNick(jid: string) {
         const iq = XEP0172.createRetrieveNickIq(jid);
         const res = await this.connection.sendAsync(iq);

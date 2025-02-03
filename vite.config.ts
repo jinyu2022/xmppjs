@@ -1,6 +1,6 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
-import { resolve, parse } from "path";
+import { resolve } from "path";
 // import { defineConfig } from "vitest/config";
 import dts from "vite-plugin-dts";
 export default defineConfig({
@@ -8,6 +8,7 @@ export default defineConfig({
     dts({
       include: ["lib/**/*.ts", "index.ts"],
       exclude: ["**/*.test.ts", "**/*.spec.ts"],
+      rollupTypes: true
     }),
   ],
   resolve: {
@@ -16,6 +17,7 @@ export default defineConfig({
     },
   },
   build: {
+    sourcemap: true, // 启用源映射
     lib: {
       entry: "./index.ts",
       name: "xmppjs",

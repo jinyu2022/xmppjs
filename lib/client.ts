@@ -1,7 +1,6 @@
 import Connection from "./connection";
 import { JID } from "./JID";
 import { plugins } from "./plugins";
-import { PluginConstructor } from "./plugins/types";
 import { Options } from "./types";
 import { Message } from "@/stanza";
 export class Client extends Connection {

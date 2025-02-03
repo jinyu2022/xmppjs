@@ -1,4 +1,4 @@
-import type xmldom from '@xmldom/xmldom';
+import type xmldom from "@xmldom/xmldom";
 
 export interface Options {
   protocol?: Protocol;
@@ -9,7 +9,7 @@ export interface Options {
 }
 export type Protocol = "ws" | "http" | "xmpp";
 
-
 declare global {
   type Element = xmldom.Element;
+  const Element: typeof xmldom.Element;
 }

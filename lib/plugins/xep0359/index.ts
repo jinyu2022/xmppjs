@@ -1,4 +1,4 @@
-import { StanzaID } from "./stanzaId";
+import { StanzaID } from "./stanzaID";
 import type { Plugin } from "../types";
 import type Connection from "@/connection";
 /**

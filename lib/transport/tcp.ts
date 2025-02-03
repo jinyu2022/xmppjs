@@ -23,8 +23,9 @@ interface SocketEventMap {
     // stanza: { name: string; attrs: Record<string, string>; children: any[] };
     "net:message": string;
     "session:start": void;
+    "session:end": never;
     binded: void;
-    [event: string | symbol]: unknown;
+    // [event: string | symbol]: unknown;
 }
 // eslint-disable-next-line @typescript-eslint/no-unsafe-declaration-merging
 interface XMPPConnection {
@@ -203,11 +204,6 @@ class XMPPConnection extends EventEmitter {
             }
         }
     }
-    /**
-     * 处理重连逻辑
-     * @deprecated
-     */
-    private async handleReconnect(): Promise<void> { }
 
     /**
      * 发送数据
@@ -339,7 +335,7 @@ class XMPPConnection extends EventEmitter {
 
     private async scramAuth(data: string) {
         if (this.status === Status.STREAM_ESTABLISHED) {
-            this.sasl.clientFirstMessageBare = `n=${this.jid.node
+            this.sasl.clientFirstMessageBare = `n=${this.jid.local
                 },r=${generateSecureNonce()}`;
             const auth = `<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='SCRAM-SHA-1'>${btoa(
                 `n,,${this.sasl.clientFirstMessageBare}`
@@ -394,7 +390,7 @@ class XMPPConnection extends EventEmitter {
     private plainAuth(data: string) {
         if (this.status === Status.STREAM_ESTABLISHED) {
             const auth = `<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>${btoa(
-                `\x00${this.jid.node}\x00${this.password}`
+                `\x00${this.jid.local}\x00${this.password}`
             )}</auth>`;
             this.send(auth);
             this.status = Status.AUTHENTICATING;

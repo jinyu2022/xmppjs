@@ -1,6 +1,6 @@
 import type { Connection } from "./connection";
 import { xmlSerializer, implementation } from "./shims";
-import type { JID } from "./JID";
+import { JID } from "./JID";
 import logger from "./log";
 
 const log = logger.getLogger("stanza");
@@ -17,8 +17,8 @@ export class StanzaBase {
   readonly tagName: string;
   // readonly xmlString: string;
   readonly id: string | null;
-  readonly to: string | null;
-  readonly from: string | null;
+  readonly to?: JID | string;
+  readonly from?: JID | string;
   [key: string]: unknown;
   // readonly [key: string]: unknown;
   constructor(stanza: Element, connection: Connection) {
@@ -32,9 +32,10 @@ export class StanzaBase {
     this.tagName = stanza.tagName;
 
     this.id = stanza.getAttribute("id");
-    this.to = stanza.getAttribute("to");
-    this.from = stanza.getAttribute("from");
-
+    this.to = stanza.getAttribute("to") ?? void 0;
+    this.from = stanza.getAttribute("from") ?? void 0;
+    if (this.to?.includes("@")) this.to = new JID(this.to);
+    if (this.from?.includes("@")) this.from = new JID(this.from);
     this.connection = connection;
     Object.defineProperty(this, "connection", {
       value: connection,
@@ -92,8 +93,10 @@ export class Iq extends StanzaBase {
 
   static parseIq(iq: Element) {
     const id = iq.getAttribute("id");
-    const to = iq.getAttribute("to");
-    const from = iq.getAttribute("from");
+    let to: JID | string | null = iq.getAttribute("to");
+    let from: JID | string | null = iq.getAttribute("from");
+    if (to?.includes("@")) to = new JID(to);
+    if (from?.includes("@")) from = new JID(from);
     const type = iq.getAttribute("type");
     const childrens = Array.from(iq.childNodes).filter(
       (child) => child.nodeType === 1
@@ -150,17 +153,19 @@ export class Message extends StanzaBase {
   static parseMessage(message: Element): Record<
     "message",
     {
-      to: string | null;
-      from: string | null;
+      to: JID | string | null;
+      from: JID | string | null;
       type: "normal" | "chat" | "groupchat" | "error";
       subject: string | null;
       body: string | null;
-      [key: string]: Element | string | null;
+      [key: string]: Element | string | JID | null;
     }
   > {
     // const id = message.getAttribute("id");
-    const to = message.getAttribute("to");
-    const from = message.getAttribute("from");
+    let to: JID | string | null = message.getAttribute("to");
+    let from: JID | string | null = message.getAttribute("from");
+    if (to?.includes("@")) to = new JID(to);
+    if (from?.includes("@")) from = new JID(from);
     const type = (message.getAttribute("type") ?? "normal") as MsgType;
     // 查找直接子节点subject
     const subjectEl = Array.from(message.childNodes).filter(
@@ -217,7 +222,7 @@ export class Presence extends StanzaBase {
   readonly status?: string | null;
   constructor(stanza: Element, connection: Connection) {
     super(stanza, connection);
-    const { type, show, status, ...children } =
+    const { to, from, type, show, status, ...children } =
       Presence.parsePresence(stanza).presence;
     this.type = type;
     this.show = show;
@@ -230,8 +235,10 @@ export class Presence extends StanzaBase {
 
   static parsePresence(presence: Element) {
     // const presence
-    const to = presence.getAttribute("to");
-    const from = presence.getAttribute("from");
+    let to: JID | string | null = presence.getAttribute("to");
+    let from : JID | string | null= presence.getAttribute("from");
+    if (to?.includes("@")) to = new JID(to);
+    if (from?.includes("@")) from = new JID(from);
     const type = presence.getAttribute("type");
     const show = presence.getElementsByTagName("show")[0]
       ?.textContent as presShow;

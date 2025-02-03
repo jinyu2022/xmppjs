@@ -30,7 +30,7 @@ export class XMPPError extends Error {
   readonly NS = "urn:ietf:params:xml:ns:xmpp-stanzas";
   readonly condition: (typeof ErrorConditions)[number] | null = null;
   readonly type: ErrorTypes | null = null;
-  readonly text: string | null = null;
+  text: string | null = null;
 
   // readonly xmlElement: Element;
   /** 标签名，message、persence、iq */
@@ -41,7 +41,7 @@ export class XMPPError extends Error {
 
   constructor(stanza: Element, message: string) {
     super(message);
-    // this.xmlElement = stanza;
+    this.name = "XMPPError";
     this.tagName = stanza.tagName;
     this.to = stanza.getAttribute("to");
     this.from = stanza.getAttribute("from");
@@ -50,21 +50,20 @@ export class XMPPError extends Error {
     const error = stanza.getElementsByTagName("error")[0];
     if (!error) return;
 
-    const condition = error.getElementsByTagNameNS(this.NS, "*")[0]?.tagName;
+    const condition = error.getElementsByTagNameNS(this.NS, "*")[0]
+      ?.tagName as (typeof ErrorConditions)[number];
     // if (!condition) {
     //   throw new Error("没有condition节点");
-    // } else 
-    if (
-      ErrorConditions.includes(condition as (typeof ErrorConditions)[number])
-    ) {
-      this.condition = condition as (typeof ErrorConditions)[number];
-    } 
+    // } else
+    if (ErrorConditions.includes(condition)) {
+      this.condition = condition;
+    }
     // else {
     //   throw new Error("未知的condition");
     // }
 
-    const type = error.getAttribute("type");
-    this.type = type as ErrorTypes;
+    const type = error.getAttribute("type") as ErrorTypes | null;
+    this.type = type;
 
     this.text = error.getElementsByTagName("text")[0]?.textContent;
   }

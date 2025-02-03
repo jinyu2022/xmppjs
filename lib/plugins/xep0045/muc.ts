@@ -1,8 +1,6 @@
 import { v4 as uuidv4 } from "uuid";
-import type { Presence } from "../../stanza";
 import { JID } from "../../JID";
-import { implementation } from "../../shims";
-import { XMPPError, TimeoutError } from "../../errors";
+import { implementation, xmlSerializer } from "../../shims";
 import { Form, DataForm } from "../xep0004/form";
 import { MUCUserPres } from "./typing";
 import logger from "@/log";
@@ -175,24 +173,6 @@ export class MUC {
     x.appendChild(invite);
     message.documentElement!.appendChild(x);
     return message.documentElement!;
-
-    // this.connection
-    //   .sendAsync(message.documentElement)
-    //   .then((res) => {
-    //     if (res.getAttribute("type") === "error") {
-    //       throw new XMPPError(res, "邀请失败");
-    //     } else {
-    //       log.error("返回奇怪的东西", res);
-    //     }
-    //   })
-    //   .catch((res) => {
-    //     // TODO: 应该和上面一样处理
-    //     if (res instanceof TimeoutError) {
-    //       return true;
-    //     } else {
-    //       throw res;
-    //     }
-    //   });
   }
 
   static getReservedNick() {}
@@ -372,7 +352,7 @@ export class MUC {
     // Q: 按照XML 架构，item元素可以有多个，但是我在例子中只看到一个
     const itemEl = xEl.getElementsByTagName("item")[0];
     if (xEl.getElementsByTagName("item").length > 1) {
-      log.error("item元素有多个", xEl);
+      log.error("item元素有多个", xmlSerializer.serializeToString(xEl));
     }
     const affiliation = itemEl.getAttribute("affiliation");
     const role = itemEl.getAttribute("role");
@@ -385,11 +365,11 @@ export class MUC {
     const item = {
       affiliation,
       role,
-      jid,
+      jid: jid ? new JID(jid) : void 0,
       nick,
       reason: itemReason,
       actor: {
-        jid: actorJid,
+        jid: actorJid ? new JID(actorJid) : void 0,
         nick: actorNick,
       },
     };
