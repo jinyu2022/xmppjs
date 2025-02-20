@@ -1,17 +1,15 @@
-import type xmldom from '@xmldom/xmldom';
+import { DOMParser, XMLSerializer, DOMImplementation } from '@xmldom/xmldom';
 import type { WebSocket as NodeWebSocket } from 'ws';
-
 // HACK：xmldom 0.9.* 解析有问题，需要手动指定命名空间
 const NS_MAP = {
-    'stream': 'http://etherx.jabber.org/streams',
+    stream: 'http://etherx.jabber.org/streams',
 } as const;
 
-async function getDOMParser() {
+function getDOMParser() {
     if (typeof window !== 'undefined' && window.DOMParser) {
-        return new DOMParser({xmlns: NS_MAP});
+        return new DOMParser({ xmlns: NS_MAP });
     }
     try {
-        const { DOMParser } = await import('@xmldom/xmldom');
         return new DOMParser({
             xmlns: NS_MAP,
             onError: (level, message) => {
@@ -26,31 +24,29 @@ async function getDOMParser() {
     }
 }
 
-async function getImplementation() {
-    if (typeof window !== 'undefined' && document.implementation) {
-        return document.implementation;
+function getImplementation() {
+    if (typeof window !== 'undefined' && window.document.implementation) {
+        return window.document.implementation;
     }
     try {
-        const { DOMImplementation } = await import('@xmldom/xmldom');
         return new DOMImplementation();
     } catch (e) {
         throw new Error('DOMImplementation不存在, 请在浏览器环境或者node环境安装xmldom');
     }
 }
 
-async function getXmlSerializer() {
+function getXmlSerializer() {
     if (typeof window !== 'undefined' && window.XMLSerializer) {
         return new XMLSerializer();
     }
     try {
-        const { XMLSerializer } = await import('@xmldom/xmldom');
         return new XMLSerializer();
     } catch (e) {
         throw new Error('XMLSerializer不存在, 请在浏览器环境或者node环境安装xmldom');
     }
 }
 
-async function getWebSocket(): Promise<typeof NodeWebSocket> {
+export async function getWebSocket() {
     if (typeof window !== 'undefined' && window.WebSocket) {
         return window.WebSocket;
     }
@@ -62,12 +58,26 @@ async function getWebSocket(): Promise<typeof NodeWebSocket> {
     }
 }
 
-// XXX:
-/** 你必须同时兼容web和node的类型 */
-export const domParser: xmldom.DOMParser = await getDOMParser();
-/** 你必须同时兼容web和node的类型 */
-export const implementation: xmldom.DOMImplementation = await getImplementation();
-/** 你必须同时兼容web和node的类型 */
-export const xmlSerializer: xmldom.XMLSerializer = await getXmlSerializer();
-/** 你必须同时兼容web和node的类型 */
-export const WS = await getWebSocket();
+/** 初始化方法，必须在使用这些变量之前调用 */
+export const domParser = getDOMParser();
+export const implementation = getImplementation();
+export const xmlSerializer = getXmlSerializer();
+// export const WS = getWebSocket();
+
+
+declare global {
+    interface Window {
+        
+        document: {
+            implementation: DOMImplementation
+        },
+        DOMParser: unknown;
+        domParser: DOMParser;
+        implementation: DOMImplementation;
+        xmlSerializer: XMLSerializer;
+        XMLSerializer: unknown;
+        WebSocket: typeof NodeWebSocket;
+    }
+    // eslint-disable-next-line no-var
+    var window: Window;
+}

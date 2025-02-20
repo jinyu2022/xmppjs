@@ -36,20 +36,24 @@ class XEP0172 extends Nickname implements Plugin {
         const iq = XEP0172.createRetrieveNickIq(jid);
         const res = await this.connection.sendAsync(iq);
         if (res.getAttribute("type") === "error" )
-            throw new XMPPError(res, "获取头像失败")
+            throw new XMPPError(res, "获取昵称失败")
         const nickEL = res.getElementsByTagNameNS(XEP0172.NS, "nick")[0]
-        return nickEL.textContent
+        return nickEL.textContent!
     }
 }
 
 import type { Message } from "@/stanza";
 import { XMPPError } from "@/errors";
-declare module "@/stanza" {
+declare module "../../stanza" {
     interface Message {
         nick?: string;
     }
+
+    interface Presence {
+        nick?: string;
+    }
 }
-declare module "@/connection" {
+declare module "../../connection" {
     interface SocketEventMap {
         "pep:nickname"?: Message;
     }

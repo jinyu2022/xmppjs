@@ -15,12 +15,11 @@ enum StreamStatus {
     ENABLE = 2,
 }
 /**
- * XEP-0198 Stream Management 插件实现
- * 用于确保XMPP消息的可靠传输和会话恢复
+ * XEP-0198 Stream Management
+ * @see https://xmpp.org/extensions/xep-0198.html
+ * @version 1.6.2 (2024-09-24)
  */
 export default class XEP0198 extends StreamManagement implements Plugin {
-    static readonly name = "XEP-0198: Stream Management";
-    static readonly version = "1.6.2 (2024-09-24)";
 
     /** XMPP连接实例 */
     readonly connection: Connection;

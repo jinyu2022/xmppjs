@@ -99,6 +99,17 @@ export class Avatar {
         };
     }
 
+    static async imageParser(
+        image: File | string
+    ): Promise<{ base64Data: string; metadata: AvatarMetadata; }> {
+        if (typeof image === "string" && typeof process !== "undefined") {
+            return Avatar.nodeImageParser(image);
+        } else if (image instanceof File && typeof window !== "undefined") {
+            return Avatar.browserImageParser(image);
+        } else {
+            throw new Error("不支持的图片类型");
+        }
+    }
     //TODO: 允许使用http上传头像，并在info中包含url
 
     /** 构建上传头像与元数据iq，只接受png格式，格式转换不是本模块的职责
@@ -106,24 +117,7 @@ export class Avatar {
      * @returns [dataIq, metadataIq]
      */
     static async createDataPublishIq(img: File | string) {
-        let base64Data = "";
-        let metadata: AvatarMetadata;
-        if (
-            typeof img === "string" &&
-            typeof require !== "undefined"
-        ) {
-            const meta = await Avatar.nodeImageParser(img);
-            base64Data = meta.base64Data;
-            metadata = meta.metadata;
-            //@ts-expect-error 没有加载DOM类型库，ts识别不出window
-        } else if (img instanceof File && typeof window !== "undefined") {
-            const { base64Data: data, metadata: meta } =
-                await Avatar.browserImageParser(img);
-            base64Data = data;
-            metadata = meta;
-        } else {
-            throw new Error("不支持的图片类型");
-        }
+        const { base64Data, metadata } = await Avatar.imageParser(img);
         /** @see https://xmpp.org/extensions/xep-0084.html#proto-info */
         if (metadata.type !== "image/png") throw new Error("只支持png格式的图片");
 

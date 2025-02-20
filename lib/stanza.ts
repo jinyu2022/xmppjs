@@ -85,10 +85,14 @@ export class Iq extends StanzaBase {
   readonly tagName = "iq";
   constructor(stanza: Element, connection: Connection) {
     super(stanza, connection);
-    const iqType = this.xml.getAttribute("type");
+    const { id, to, from, type, ...children } = Iq.parseIq(stanza).iq;
     // iq节点必须有type属性
-    if (!iqType) throw new Error("iq节点必须有type属性");
-    this.type = iqType;
+    if (!type) throw new Error("iq节点必须有type属性");
+    this.type = type;
+    // 将其余子节点添加到实例上
+    for (const [key, value] of Object.entries(children)) {
+      this[key] = value;
+    }
   }
 
   static parseIq(iq: Element) {

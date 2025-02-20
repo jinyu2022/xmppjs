@@ -1,5 +1,5 @@
 import { EventEmitter } from "events";
-import { domParser, xmlSerializer, WS } from "../shims";
+import { domParser, xmlSerializer, getWebSocket } from "../shims";
 import { EntityCaps, Capabilities } from "@/plugins/xep0115/entityCaps";
 import { TimeoutError, XMPPError } from "../errors";
 import { Status, SaslData } from "./typing";
@@ -75,11 +75,12 @@ export class WSConnection extends EventEmitter {
     this.password = password;
   }
 
-  connect(url?: string) {
+  async connect(url?: string) {
     if (url){
       this.url = url;
     }
     if (!this.url) throw Error("缺少url")
+    const WS = await getWebSocket();
     this.ws = new WS(this.url, "xmpp");
     log.debug("connecting", url);
     this.ws.onopen = (ev) => this.onOpen(ev);
