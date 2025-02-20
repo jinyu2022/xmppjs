@@ -3,13 +3,13 @@ import type Connection from "@/connection";
 import { implementation } from "@/shims";
 import { XMPPError } from "@/errors";
 
-type subscription = "none" | "to" | "from" | "both";
+type Subscription = "none" | "to" | "from" | "both" | "remove";
 export interface Roster {
   approved: boolean;
   jid: string;
   name?: string;
-  ask?: string;
-  subscription: subscription;
+  ask?: 'subscribe';
+  subscription: Subscription;
 }
 class RFC6121 implements Plugin {
   name = "RFC6121: XMPP Instant Messaging and Presence";
@@ -101,8 +101,8 @@ class RFC6121 implements Plugin {
     this.connection.send(presence);
   }
 
-  /** 撤销被订阅 */
-  async removeSubscription(jid: string) {
+  /** 撤销被订阅/拒绝订阅请求/取消预批准 */
+  removeSubscription(jid: string) {
     const doc = implementation.createDocument("jabber:client", "presence", null);
     const presence = doc.documentElement!;
     presence.setAttribute("to", jid);
@@ -111,7 +111,7 @@ class RFC6121 implements Plugin {
   }
 
   /** 取消订阅 */
-  async cancelSubscribe(jid: string) {
+  cancelSubscribe(jid: string) {
     const doc = implementation.createDocument("jabber:client", "presence", null);
     const presence = doc.documentElement!;
     presence.setAttribute("to", jid);
@@ -119,8 +119,8 @@ class RFC6121 implements Plugin {
     this.connection.send(presence);
   }
 
-  /** 预批准被订阅请求 */
-  async approveSubscription(jid: string) {
+  /** 预批准被订阅请求/批准订阅请求 */
+  approveSubscription(jid: string) {
     const doc = implementation.createDocument("jabber:client", "presence", null);
     const presence = doc.documentElement!;
     presence.setAttribute("to", jid);
@@ -135,9 +135,9 @@ class RFC6121 implements Plugin {
       const approved = item.getAttribute("approved") === "true";
       const jid = item.getAttribute("jid")!;
       const name = item.getAttribute("name") ?? void 0;
-      const ask = item.getAttribute("ask") ?? void 0;
+      const ask = item.getAttribute("ask") as 'subscribe' | null ?? void 0;
       const subscription = (item.getAttribute("subscription") ??
-        "none") as subscription;
+        "none") as Subscription;
       return { approved, jid, name, ask, subscription };
     });
 
@@ -146,15 +146,15 @@ class RFC6121 implements Plugin {
 }
 
 import type { Iq } from "@/stanza";
-declare module "@/connection" {
-  interface SocketEventMap {
-    /** RFC6121 */
+declare module "../../connection" {
+  export interface SocketEventMap {
+    /** RFC6121，你自己根据subscription判断是添还是删除 */
     "roster:update": Iq;
   }
 }
 
-declare module "@/stanza" {
-  interface Iq {
+declare module "../../stanza" {
+  export interface Iq {
     roster?: Roster[];
   }
 }

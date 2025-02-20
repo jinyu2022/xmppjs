@@ -27,7 +27,7 @@ export default class XEP0199 extends Ping implements Plugin {
                 iq.type === "get" &&
                 iq.xml.getElementsByTagNameNS("urn:xmpp:ping", "ping").length > 0
             ) {
-                const result = Ping.createPingResultIq(iq.from!, iq.id!);
+                const result = Ping.createPingResultIq(iq.from!.toString(), iq.id!);
                 this.connection.send(result);
             }
         };

@@ -11,6 +11,7 @@ export class JID {
     this.local = local;
     this.domain = domain;
     this.resource = resource;
+    /** 如果没有resource，末尾会有个/号 */
     this.full = `${this.local}@${this.domain}/${this.resource ?? ""}`;
     this.bare = `${this.local}@${this.domain}`;
   }
@@ -37,7 +38,7 @@ export class JID {
     return { local, domain, resource };
   }
 
-  equals(other: any): boolean {
+  equals(other: unknown): boolean {
     if (!(other instanceof JID)) {
       return false;
     }
@@ -45,7 +46,8 @@ export class JID {
   }
 
   toString(): string {
-    return this.full;
+    // 避免结尾有无效的 '/'
+    return this.resource ? this.full : this.bare;
   }
 
 }

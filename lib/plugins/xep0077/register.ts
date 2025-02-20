@@ -67,7 +67,7 @@ export class WSconnection extends EventEmitter{
   }
 
   async connect() {
-    const {WS} = await import("@/shims");
+    const WS = (await import("@/shims")).getWebSocket();
     // @ts-expect-error node的ws和浏览器的ws类型不一样
     this.socket = new WS(this.url);
     this.socket!.onopen = this.onOpen.bind(this);

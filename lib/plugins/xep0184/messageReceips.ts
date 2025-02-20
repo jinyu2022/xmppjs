@@ -13,14 +13,22 @@ export class MessageReceips {
         };
     }
 
-    static createReceiptsEl(type: "received" | "request", id?: string) {
+    // 重载签名
+    static createReceiptsEl(type: "request"): Element;
+    static createReceiptsEl(type: "received", id: string): Element;
+    
+    // 实现
+    static createReceiptsEl(type: "received" | "request", id?: string): Element {
         const message = implementation.createDocument(MessageReceips.NS, type).documentElement!;
-        if (id) message.setAttribute("id", id);
+        if (type === "received") {
+            if (!id) throw new Error("回执请求需要提供消息ID");
+            message.setAttribute("id", id);
+        }
         return message;
     }
 }
 
-declare module "@/stanza" {
+declare module "../../stanza" {
     interface Message {
         receipts?: {
             id?: string;

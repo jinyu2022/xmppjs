@@ -16,12 +16,12 @@ export default class XEP0115 extends EntityCaps implements Plugin {
     init() {
         this.connection.registerStanzaPlugin(EntityCaps.NS, EntityCaps.parseCaps);
 
-        this.connection.registerInterceptor("send", (stanza) => {
-            if (stanza.tagName === "presence" && this.selfCaps) {
-                stanza.appendChild(this.selfCaps);
-            }
-            return stanza; 
-        });
+        // this.connection.registerInterceptor("send", (stanza) => {
+        //     if (stanza.tagName === "presence" && this.selfCaps) {
+        //         stanza.appendChild(this.selfCaps);
+        //     }
+        //     return stanza; 
+        // });
 
         this.connection.on("presence", (presence) => {
             // TODO: 通过ver查找文件中对应的实体能力，然后加入到discos中
@@ -29,6 +29,7 @@ export default class XEP0115 extends EntityCaps implements Plugin {
 
         this.connection.once("connect", async () => {
             const identities  = this.connection.XEP0030!.identities;
+            // 要排序，所以转成数组
             const features = [...this.connection.XEP0030!.features];
             const ver = await EntityCaps.generateCapsVerification(identities, features);
             this.selfCaps = EntityCaps.createCapsElement({

@@ -4,9 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "files": [
-    "dist",
-    "index.d.ts"
+    "dist/",
+    "index.d.ts",
+    "index.js"
   ],
+  "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -16,7 +18,7 @@
     },
     "./lib/*": {
       "import": "./dist/lib/*",
-      "types": "./dist/lib/*.d.ts"
+      "types": "./dist/lib/*"
     }
   },
   "scripts": {
@@ -24,13 +26,15 @@
     "build": "tsc && vite build",
     "bulid-no-tsc": "vite build",
     "ts-check": "tsc --noEmit",
-    "ts-build": "tsc",
+    "ts-build": "tsc && tsc-alias",
+    "tsc-alias": "tsc-alias",
     "test": "vitest"
   },
   "devDependencies": {
     "@eslint/js": "^9.16.0",
     "eslint": "^9.16.0",
     "globals": "^15.13.0",
+    "tsc-alias": "^1.8.10",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.17.0",
     "vite": "^6.0.1",
@@ -38,6 +42,7 @@
     "vitest": "^2.1.8"
   },
   "dependencies": {
+    "hsluv": "^1.0.1",
     "loglevel": "^1.9.2",
     "uuid": "^11.0.3"
   },
@@ -46,5 +51,8 @@
     "events": "^3.3.0",
     "image-size": "^1.2.0",
     "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

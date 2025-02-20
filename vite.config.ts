@@ -8,7 +8,7 @@ export default defineConfig({
     dts({
       include: ["lib/**/*.ts", "index.ts"],
       exclude: ["**/*.test.ts", "**/*.spec.ts"],
-      rollupTypes: true
+      // rollupTypes: true
     }),
   ],
   resolve: {

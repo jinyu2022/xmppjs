@@ -6,7 +6,7 @@ export interface Transport {
     /** 连接状态 */
     status: "open" | "close" | "error";
 }
-export enum Status {
+export const enum Status {
     /** 客户端未连接 */
     DISCONNECTED = 0,
     /** 正在连接到服务器 */
