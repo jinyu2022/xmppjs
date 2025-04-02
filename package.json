@@ -49,7 +49,7 @@
   "optionalDependencies": {
     "@xmldom/xmldom": "^0.9.6",
     "events": "^3.3.0",
-    "image-size": "^1.2.0",
+    "image-size": "^1.2.1",
     "ws": "^8.18.0"
   },
   "engines": {
