@@ -10,12 +10,12 @@ export class Delay {
                 ? delay
                 : delay.getElementsByTagName("delay")[0];
         if (!delayElement) throw new XMPPError(delay, "未找到 delay 标签");
-        const delayStamp = delayElement.getAttribute("stamp");
-        const delayFrom = delayElement.getAttribute("from");
-        const delayReason = delayElement.textContent;
+        const delayStamp = delayElement.getAttribute("stamp")!;
+        const delayFrom = delayElement.getAttribute("from")!;
+        const delayReason = delayElement.textContent ?? void 0;
         return {
             delay: {
-                stamp: XMPPDateTime.parseDateTime(delayStamp!),
+                stamp: XMPPDateTime.parseDateTime(delayStamp),
                 from: delayFrom,
                 reason: delayReason,
             }

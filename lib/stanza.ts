@@ -74,14 +74,17 @@ export class StanzaBase {
       configurable: true, // 属性可删除或重新定义
     });
   }
-
+  
+  /**
+   * @returns xml字符串
+   */
   toString() {
     return xmlSerializer.serializeToString(this.xml);
   }
 }
 
 export class Iq extends StanzaBase {
-  readonly type: string;
+  readonly type: "get" | "set" | "result" | "error";
   readonly tagName = "iq";
   constructor(stanza: Element, connection: Connection) {
     super(stanza, connection);
@@ -101,7 +104,7 @@ export class Iq extends StanzaBase {
     let from: JID | string | null = iq.getAttribute("from");
     if (to?.includes("@")) to = new JID(to);
     if (from?.includes("@")) from = new JID(from);
-    const type = iq.getAttribute("type");
+    const type = iq.getAttribute("type") as 'get' | 'set' | 'result' | 'error';
     const childrens = Array.from(iq.childNodes).filter(
       (child) => child.nodeType === 1
     );
@@ -137,7 +140,7 @@ export class Iq extends StanzaBase {
 }
 
 export class Message extends StanzaBase {
-  readonly type: string;
+  readonly type: 'normal' | 'chat' | 'groupchat' | 'error' | null;
   readonly tagName = "message";
   readonly subject?: string | null;
   readonly body?: string | null;

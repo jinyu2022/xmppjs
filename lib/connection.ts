@@ -403,6 +403,7 @@ export class Connection extends EventEmitter {
       ? (stanza.tagName as keyof StanzaHandlerMap)
       : "others";
     const stanzaInstance = this.stanzaInstanceFactory(stanza);
+    // 发出节事件
     this.emit(tagName, stanzaInstance);
   }
 
@@ -510,7 +511,8 @@ export class Connection extends EventEmitter {
           this.emit(eventPlugin.eventName, stanzaInstance);
         }
       }
-      this.emit("message", stanzaInstance);
+      // 407行已经发出过了
+      // this.emit("message", stanzaInstance);
     } else if (tagName === "iq") {
       stanzaInstance = new Iq(stanza, this);
       this.traverseAndTransform(stanzaInstance);
@@ -519,7 +521,7 @@ export class Connection extends EventEmitter {
           this.emit(eventPlugin.eventName, stanzaInstance);
         }
       }
-      this.emit("iq", stanzaInstance);
+      // this.emit("iq", stanzaInstance);
     } else if (tagName === "presence") {
       stanzaInstance = new Presence(stanza, this);
       this.traverseAndTransform(stanzaInstance);
@@ -528,7 +530,7 @@ export class Connection extends EventEmitter {
           this.emit(eventPlugin.eventName, stanzaInstance);
         }
       }
-      this.emit("presence", stanzaInstance);
+      // this.emit("presence", stanzaInstance);
     } else {
       stanzaInstance = new StanzaBase(stanza, this);
       this.traverseAndTransform(stanzaInstance);
@@ -537,7 +539,7 @@ export class Connection extends EventEmitter {
           this.emit(eventPlugin.eventName, stanzaInstance);
         }
       }
-      this.emit("others", stanzaInstance);
+      // this.emit("others", stanzaInstance);
     }
 
     return stanzaInstance;

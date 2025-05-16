@@ -15,3 +15,14 @@ export class XEP0203 extends Delay implements Plugin {
 }
 
 export default XEP0203;
+
+declare module "../../stanza" {
+    interface Message {
+        /** xep0203 */
+        delay?: {
+            stamp: Date;
+            from: string;
+            reason?: string;
+        };
+    }
+}

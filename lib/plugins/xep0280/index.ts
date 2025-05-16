@@ -6,7 +6,7 @@ import logger from "@/log";
 const log = logger.getLogger("XEP0280");
 export class XEP0280 extends Carbons implements Plugin {
   readonly name = "XEP0280";
-  static readonly dependencies = ["XEP0030"] as const;
+  static readonly dependencies = ["XEP0030", "XEP0297"] as const;
   readonly connection: Connection;
   constructor(connection: Connection) {
     super();
@@ -72,12 +72,13 @@ export class XEP0280 extends Carbons implements Plugin {
   }
 }
 
+import type { Forwarded } from "../XEP0297/forward";
 declare module "../../stanza" {
   interface Message {
     /** 由插件XEP0280添加 */
     readonly carbon?: {
       type: "received" | "sent";
-      forwarded: Element;
+      forwarded: Forwarded;
     };
   }
 }

@@ -1,12 +1,12 @@
 import { XMPPError } from "../../errors";
 
-export interface Base {
+interface Base {
   message?: Element | null;
   presence?: Element | null;
   iq?: Element | null;
 }
 // 生成只包含一个键的对象类型的联合
-type Forwarded = {
+export type Forwarded = {
   delay?: Element | null;
 } & {
   [K in keyof Base]: Pick<Base, K>;
