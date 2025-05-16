@@ -48,6 +48,8 @@ npm run dev
 
 欢迎提交 Issue 和 Pull Request！
 
+这是我对js/ts和xmpp的学习项目，他有很多不足之处，欢迎大家提出意见和建议。
+
 ## 感谢
 感谢以下项目和库的支持：
 
