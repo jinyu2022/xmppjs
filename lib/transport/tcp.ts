@@ -360,7 +360,7 @@ class XMPPConnection extends EventEmitter {
         this.status = Status.AUTHENTICATED;
         const xml = domParser.parseFromString(data, "text/xml")
           .documentElement!;
-        const v = atob(xml.textContent!).split("v=")[1];
+        const v = atob(xml.textContent).split("v=")[1];
         if (!v) throw new Error("无法解析服务器签名");
         log.debug("v", v);
 

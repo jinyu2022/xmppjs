@@ -1,10 +1,13 @@
 import type { Connection } from "./connection";
+import type { XMPPElement } from "./ltx/Element";
 import { xmlSerializer, implementation } from "./shims";
 import { JID } from "./JID";
 import logger from "./log";
 
 const log = logger.getLogger("stanza");
+/**away：离开 chat：在线 dnd：忙碌 xa：离开（长时间）*/
 type presShow = "away" | "chat" | "dnd" | "xa";
+/**normal：普通消息（默认值） chat：聊天消息 groupchat：群聊消息 error：错误消息 */
 type MsgType = "normal" | "chat" | "groupchat" | "error";
 export class StanzaBase {
   static readonly NS = "jabber:client" as const;
@@ -12,7 +15,7 @@ export class StanzaBase {
   /** TIP: 可以直接访问，但无法枚举 */
   private readonly connection: Connection;
   /** TIP: 可以直接访问，但无法枚举 */
-  readonly xml: Element;
+  readonly xml: XMPPElement;
   /** 标签名，message、persence、iq */
   readonly tagName: string;
   // readonly xmlString: string;
@@ -20,8 +23,7 @@ export class StanzaBase {
   readonly to?: JID | string;
   readonly from?: JID | string;
   [key: string]: unknown;
-  // readonly [key: string]: unknown;
-  constructor(stanza: Element, connection: Connection) {
+  constructor(stanza: XMPPElement, connection: Connection) {
     this.xml = stanza;
     Object.defineProperty(this, "xml", {
       value: stanza,
@@ -30,7 +32,6 @@ export class StanzaBase {
       configurable: true, // 属性可删除或重新定义
     });
     this.tagName = stanza.tagName;
-
     this.id = stanza.getAttribute("id");
     this.to = stanza.getAttribute("to") ?? void 0;
     this.from = stanza.getAttribute("from") ?? void 0;

@@ -31,11 +31,11 @@ function stringToArrayBuf(str: string) {
 }
 
 function base64ToArrayBuf(str: string) {
-  return Uint8Array.from(atob(str), (c) => c.charCodeAt(0))?.buffer;
+  return Uint8Array.from(atob(str), (c) => c.charCodeAt(0)).buffer;
 }
 
 export function arrayBufToBase64(buf: ArrayBuffer) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  return btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(buf))));
 }
 /**
  * 计算客户端证明 (client proof)
@@ -46,7 +46,7 @@ export function arrayBufToBase64(buf: ArrayBuffer) {
  */
 export async function scramClientProof(
   authMessage: string,
-  clientKey: ArrayBufferLike,
+  clientKey: ArrayBuffer,
   hashName: string
 ) {
   // 使用指定哈希算法处理客户端密钥
@@ -201,7 +201,7 @@ export async function scramDeriveKeys(
  */
 export async function scramServerSign(
   authMessage: string,
-  serverKey: ArrayBufferLike,
+  serverKey: ArrayBuffer,
   hashName: string
 ) {
   // 导入服务器密钥用于 HMAC 运算
@@ -230,7 +230,7 @@ export function generateSecureNonce(length: number = 16) {
   // 生成随机字节
   const array = new Uint8Array(length);
   // 转换为 base64 并移除特殊字符
-  return arrayBufToBase64(crypto.getRandomValues(array))
+  return arrayBufToBase64(crypto.getRandomValues(array).buffer)
 }
 
 /** 应对挑战

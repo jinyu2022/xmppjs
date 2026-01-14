@@ -97,7 +97,7 @@ export class Form {
                 .filter(Boolean),
             options: Array.from(field.getElementsByTagName("option")).map(
                 (option) => ({
-                    label: option.getAttribute("label") ?? undefined,
+                    label: option.getAttribute("label") ?? void 0,
                     value: option.getElementsByTagName("value")[0].textContent!,
                 })
             ),

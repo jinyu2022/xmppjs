@@ -1,15 +1,10 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
-import { resolve } from "path";
+import path, { resolve } from "node:path";
 // import { defineConfig } from "vitest/config";
 import dts from "vite-plugin-dts";
 export default defineConfig({
   plugins: [
-    dts({
-      include: ["lib/**/*.ts", "index.ts"],
-      exclude: ["**/*.test.ts", "**/*.spec.ts"],
-      // rollupTypes: true
-    }),
   ],
   resolve: {
     alias: {

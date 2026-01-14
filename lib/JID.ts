@@ -44,7 +44,9 @@ export class JID {
     }
     return this.full === other.full;
   }
-
+  /**
+   * 使用此方法结尾不会有 ‘/’ 号
+   */
   toString(): string {
     // 避免结尾有无效的 '/'
     return this.resource ? this.full : this.bare;
