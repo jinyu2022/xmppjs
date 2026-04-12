@@ -4,8 +4,13 @@ import type { Plugin } from "../types";
 import { Carbons } from "./carbons";
 import logger from "@/log";
 const log = logger.getLogger("XEP0280");
+
+/**
+ * XEP-0280: Message Carbons
+ * @see https://xmpp.org/extensions/xep-0280.html
+ * @version 1.0.0 (2014-11-18)
+ */
 export class XEP0280 extends Carbons implements Plugin {
-  readonly name = "XEP0280";
   static readonly dependencies = ["XEP0030", "XEP0297"] as const;
   readonly connection: Connection;
   constructor(connection: Connection) {
@@ -33,7 +38,7 @@ export class XEP0280 extends Carbons implements Plugin {
     this.connection.registerEventPlugin("carbon:received", {
       tagName: "message",
       matcher: (message) => {
-        return !!(message?.carbon && message.carbon.type === "received");
+        return message?.carbon?.type === "received";
       },
     });
 
@@ -86,9 +91,9 @@ declare module "../../stanza" {
 declare module "../../connection" {
   interface SocketEventMap {
     /** 由插件XEP0280添加 */
-    "carbon:received": Message;
+    "carbon:received": Message & { carbon: { type: "received"; forwarded: Forwarded } };
     /** 由插件XEP0280添加 */
-    "carbon:sent": Message;
+    "carbon:sent": Message & { carbon: { type: "sent"; forwarded: Forwarded } };
   }
 }
 

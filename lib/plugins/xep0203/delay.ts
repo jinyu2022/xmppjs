@@ -1,10 +1,11 @@
 import { implementation } from "../../shims";
 import { XMPPDateTime } from "../xep0082/dateTime";
 import { XMPPError } from "../../errors";
+import type { XMPPElement } from "../../ltx";
 export class Delay {
     static readonly NS = "urn:xmpp:delay";
 
-    static parseDelayEl(delay: Element) {
+    static parseDelayEl(delay: XMPPElement) {
         const delayElement =
             delay.tagName === "delay"
                 ? delay

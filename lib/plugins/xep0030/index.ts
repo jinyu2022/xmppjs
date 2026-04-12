@@ -28,7 +28,7 @@ export class XEP0030 extends Disco implements Plugin {
   private readonly serverIdentities: Array<Identity> = [];
 
   /** 默认300秒 */
-  readonly TTL = 300_0000 as const;
+  readonly TTL = 3_000_000 as const;
 
   /** 查询info缓存, 键为jid */
   private readonly infoCache: Map<string, DiscoInfoCache> = new Map();
@@ -46,6 +46,7 @@ export class XEP0030 extends Disco implements Plugin {
     this.addFeature(Disco.NS.DISCO_ITEMS);
 
     this.connection.once("session:start", async () => {
+      // 获取自己的服务器的disco信息并缓存
       const iq = Iq.createIq(
         "get",
         this.connection.jid.domain,
@@ -54,7 +55,7 @@ export class XEP0030 extends Disco implements Plugin {
       let identities: Identity[];
       let features: Set<string>;
       try {
-        const res = await this.connection.sendAsync(iq.documentElement!);
+        const res = await this.connection.sendAsync(iq);
         const query = Disco.parseDiscoInfo(res);
         identities = query.identities;
         features = query.features;
@@ -130,9 +131,10 @@ export class XEP0030 extends Disco implements Plugin {
    * @param cache 是否使用缓存, 默认使用
    */
   async getDiscoInfo(to: string | JID, node?: string, cache = true) {
-    const iq = Iq.createIq("get", to, Disco.NS.DISCO_INFO).documentElement!;
+    const iq = Iq.createIq("get", to, Disco.NS.DISCO_INFO);
     if (node) {
-      iq.setAttributeNS(Disco.NS.DISCO_INFO, "node", node);
+      const query = iq.getElementsByTagName("query")[0];
+      query.setAttribute("node", node);
     }
     if (cache) {
       const cache = this.infoCache.get(to.toString());
@@ -157,9 +159,10 @@ export class XEP0030 extends Disco implements Plugin {
    * @returns 响应的xml
    */
   async getDiscoItems(to: string | JID, node?: string, cache = true): Promise<Item[]> {
-    const iq = Iq.createIq("get", to, Disco.NS.DISCO_ITEMS).documentElement!;
+    const iq = Iq.createIq("get", to, Disco.NS.DISCO_ITEMS);
     if (node) {
-      iq.setAttributeNS(Disco.NS.DISCO_ITEMS, "node", node);
+      const query = iq.getElementsByTagName("query")[0];
+      query.setAttribute("node", node);
     }
     if (cache) {
       const cache = this.itemsCache.get(to.toString());

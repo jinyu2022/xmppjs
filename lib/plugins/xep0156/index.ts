@@ -27,7 +27,7 @@ class XEP0156 extends XMPPDiscoverer implements Plugin {
       return;
     }
     // 获取连接方法
-    return XEP0156.discoverAltXMPP(this.connection.jid.domain)
+    XEP0156.discoverAltXMPP(this.connection.jid.domain)
       .then((result) => {
         let urlStr;
         if (this.connection.protocol == "ws") {

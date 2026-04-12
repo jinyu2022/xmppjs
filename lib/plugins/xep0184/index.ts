@@ -1,7 +1,7 @@
 import { MessageReceips } from "./messageReceips";
 import type Connection from "@/connection";
 import type { Plugin } from "../types";
-import { implementation } from "@/shims"; 
+import { Message } from "@/stanza";
 /**
  * XEP-0184: Message Receipts
  * version: 1.0.0 (2024-09-24)
@@ -32,15 +32,18 @@ export default class XEP0184 extends MessageReceips implements Plugin {
     });
     // 接收消息，处理回执请求
     this.connection.on("message", (message) => {
-      // 聊天室中发送 “groupchat” 类型的内容消息时，不建议请求回执
-      /**@see https://xmpp.org/extensions/xep-0184.html#when-groupchat */
+      /**
+       * 聊天室中发送 “groupchat” 类型的内容消息时，不建议请求回执
+       * @see https://xmpp.org/extensions/xep-0184.html#when-groupchat 
+       * */
       if (message.receipts?.type === "request" && message.type !== "groupchat" && message.type !== "error") { 
         const id = message.id!;
-        const doc = implementation.createDocument("jabber:client", "message")
         const received  = XEP0184.createReceiptsEl("received", id);
-        const msg = doc.documentElement!;
-        msg.setAttribute("to", message.from!.toString());
-        msg.setAttribute("type", message.type);
+        const msg = Message.createMessage(
+          message.from!.toString(),
+          "",
+          message.type!
+        );
         msg.appendChild(received);
         this.connection.send(msg); 
       } 

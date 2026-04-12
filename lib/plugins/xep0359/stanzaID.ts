@@ -1,5 +1,5 @@
 import { XMPPError } from "@/errors";
-
+import type { XMPPElement } from "@/ltx";
 interface StableStanzaID {
     id: string;
     by?: string;
@@ -9,7 +9,7 @@ export class StanzaID {
     static readonly NS = "urn:xmpp:sid:0" as const;
 
     static parseStanzaId(
-        stanza: Element
+        stanza: XMPPElement
     ): Record<"stanzaID" | "originID" | "referencedStanza", StableStanzaID> {
         if (stanza.namespaceURI !== StanzaID.NS)
             throw new XMPPError(stanza, "不是stanzaId命名空间");

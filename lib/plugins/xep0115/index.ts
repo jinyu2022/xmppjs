@@ -1,13 +1,14 @@
 import { EntityCaps } from "./entityCaps";
 import type Connection from "@/connection";
 import type { Plugin } from "../types";
+import type { XMPPElement } from "@/ltx";
 // TODO: 准备一个文件，内置部分能力与哈希值的映射
 export default class XEP0115 extends EntityCaps implements Plugin {
     static readonly name = "XEP-0115: Entity Capabilities";
     static readonly version = "1.6.0 (2022-03-08)";
     static readonly dependencies = ["XEP0030"] as const;
     readonly connection: Connection;
-    private selfCaps?: Element
+    private selfCaps?: XMPPElement
     constructor(connection: Connection) {
         super();
         this.connection = connection;

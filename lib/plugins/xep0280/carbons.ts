@@ -1,27 +1,27 @@
-import { implementation } from "../../shims";
+import { XMPPElement } from "@/ltx";
 import { XMPPError } from "../../errors";
 import { Iq } from "@/stanza";
 export class Carbons {
   static readonly NS = "urn:xmpp:carbons:2";
 
   static createEnableIq() {
-    const iq = Iq.createIq("set").documentElement!;
+    const iq = Iq.createIq("set");
     iq.appendChild(
-      implementation.createDocument(Carbons.NS, "enable", null).documentElement!
+      XMPPElement.createElementNS(Carbons.NS, "enable")
     );
     return iq;
   }
 
   static createDisableIq() {
-    const iq = Iq.createIq("set").documentElement!;
+    const iq = Iq.createIq("set");
     iq.appendChild(
-      implementation.createDocument(Carbons.NS, "disable", null).documentElement!
+      XMPPElement.createElementNS(Carbons.NS, "disable")
     );
     return iq;
   }
 
 
-  static parseCarbonEl(carbon: Element) {
+  static parseCarbonEl(carbon: XMPPElement) {
     // 判断当前节点是否为 received/sent
     const received =
       carbon.tagName === "received"

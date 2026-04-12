@@ -1,6 +1,12 @@
 import type { Connection } from "../../connection.ts";
 import type { Plugin } from "../types.ts";
 import { Delay } from "./delay.ts";
+
+/**
+ * XEP-0203：Delayed Delivery
+ * @see https://xmpp.org/extensions/xep-0203.html
+ * @version 1.0.1 (2010-11-11)
+ */
 export class XEP0203 extends Delay implements Plugin {
     // readonly NS = "urn:xmpp:carbons:2";
     readonly name = "XEP-0203: Delayed Delivery";

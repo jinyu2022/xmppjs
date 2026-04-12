@@ -1,5 +1,7 @@
-import { implementation } from "@/shims";
+import { XMPPElement } from "@/ltx/Element";
+import { Iq } from "@/stanza";
 import { XEP0128 } from "@/plugins/xep0128";
+import logger from "@/log";
 import type { JID } from "@/JID";
 export interface Identity {
   category: string;
@@ -13,6 +15,14 @@ export interface Item {
   name?: string | null;
 }
 
+const log = logger.getLogger("XEP0030"); 
+/**
+ * Service Discovery (XEP-0030) 插件
+ * 用于处理XMPP实体的服务发现信息和项目列表
+ * 包括解析和生成disco#info和disco#items的IQ响应
+ * @see https://xmpp.org/extensions/xep-0030.html
+ * @version 2.5.0 (2024-04-30)
+ */
 export class Disco {
   static readonly NS = {
     DISCO_INFO: "http://jabber.org/protocol/disco#info",
@@ -25,8 +35,8 @@ export class Disco {
   readonly features: Set<string> = new Set();
   items: Item[] = [];
 
-  static parseDiscoInfo(xml: Element) {
-    let query: Element;
+  static parseDiscoInfo(xml: XMPPElement) {
+    let query: XMPPElement;
     if (xml.namespaceURI !== Disco.NS.DISCO_INFO) {
       query = xml.getElementsByTagNameNS(Disco.NS.DISCO_INFO, "query")[0];
     } else {
@@ -51,8 +61,8 @@ export class Disco {
     return { identities, features, extensions: form };
   }
 
-  static parseDiscoItems(xml: Element) {
-    let query: Element;
+  static parseDiscoItems(xml: XMPPElement) {
+    let query: XMPPElement;
     if (xml.namespaceURI !== Disco.NS.DISCO_ITEMS) {
       query = xml.getElementsByTagNameNS(Disco.NS.DISCO_ITEMS, "query")[0];
     } else {
@@ -75,7 +85,7 @@ export class Disco {
   addFeature(value: string) {
     // 检查有没有重复的
     if (this.features.has(value)) {
-      throw new Error("已经存在相同的特性");
+      log.warn("已经存在相同的特性");
     }
     this.features.add(value);
   }
@@ -155,12 +165,9 @@ export class Disco {
   }
 
   createInfoResult(to: string | JID, id: string, queryNode?: string | null) {
-    const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement!;
-    iq.setAttribute("type", "result");
-    iq.setAttribute("to", to.toString());
+    const iq = Iq.createIq("result", to);
     iq.setAttribute("id", id);
-    const query = doc.createElementNS(Disco.NS.DISCO_INFO, "query");
+    const query = XMPPElement.createElementNS(Disco.NS.DISCO_INFO, "query");
 
     const identities = this.identities;
     if (queryNode) {
@@ -168,11 +175,7 @@ export class Disco {
       // TODO: 到底要根据node返回什么？
     }
     for (const identity of identities) {
-      const identityElement = implementation.createDocument(
-        null,
-        "identity",
-        null
-      ).documentElement!;
+      const identityElement = XMPPElement.createElement("identity");
       identityElement.setAttribute("category", identity.category);
       identityElement.setAttribute("type", identity.type);
       if (identity.name) {
@@ -184,11 +187,7 @@ export class Disco {
       query.appendChild(identityElement);
     }
     for (const feature of this.features) {
-      const featureElement = implementation.createDocument(
-        null,
-        "feature",
-        null
-      ).documentElement!;
+      const featureElement = XMPPElement.createElement("feature");
       featureElement.setAttribute("var", feature);
       query.appendChild(featureElement);
     }
@@ -197,13 +196,9 @@ export class Disco {
   }
 
   createItemsResult(to: string | JID, id: string, queryNode?: string | null) {
-    const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement!;
-    const query = doc.createElementNS(Disco.NS.DISCO_ITEMS, "query");
-    iq.setAttribute("type", "result");
-    iq.setAttribute("to", to.toString());
+    const iq = Iq.createIq("result", to);
     iq.setAttribute("id", id);
-    iq.setAttribute("id", id);
+    const query = XMPPElement.createElementNS(Disco.NS.DISCO_ITEMS, "query");
     let items = this.items;
     if (queryNode) {
       query.setAttribute("node", queryNode);
@@ -211,8 +206,7 @@ export class Disco {
       items = items.filter((i) => i.node === queryNode);
     }
     for (const item of items) {
-      const itemElement = implementation.createDocument(null, "item", null)
-        .documentElement!;
+      const itemElement = XMPPElement.createElement("item");
       itemElement.setAttribute("jid", item.jid);
       if (item.name) {
         itemElement.setAttribute("name", item.name);

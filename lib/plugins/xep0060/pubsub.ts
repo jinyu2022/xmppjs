@@ -1,15 +1,27 @@
 import { Iq } from "@/stanza";
 import { JID } from "@/JID";
-export interface PubsubEventItems<T = "item"|"retract"> {
-    node: string;
-    retracts: T extends "retract" ? string[] : never;
-    item: T extends "item" ? PubsubEventItem : never;
+import { XMPPElement } from "@/ltx/Element";
+export interface PubsubEventItems {
+    node?: string;
+    retracts?: string[];
+    item?: PubsubEventItem;
+    collection?: XMPPElement;
+    configuration?: XMPPElement;
+    delete?: XMPPElement;
+    purge?: XMPPElement;
+    subscription?: XMPPElement;
 }
 export interface PubsubEventItem {
     id?: string;
     publisher?: string;
     // 根据节点的不同，可能有不同的子元素
+    [key: string]: unknown;
 }
+/**
+ * XEP-0060: Publish-Subscribe
+ * @see https://xmpp.org/extensions/xep-0060.html
+ * @version 1.30.0 (2025-11-11)
+ */
 export class Pubsub {
     static readonly NS = {
         BASE: "http://jabber.org/protocol/pubsub",
@@ -22,27 +34,33 @@ export class Pubsub {
      * @param max 最大数量
      * @param id item id
      */
-    static createRetrieveItemsIq(to: string | JID, node: string, max?: number, id?: string) {
+    static createRetrieveItemsIq(
+        to: string | JID,
+        node: string,
+        max?: number,
+        id?: string,
+    ) {
         const iq = Iq.createIq("get", to);
-        const pubsub = iq.createElementNS(Pubsub.NS.BASE, "pubsub");
-        const items = iq.createElement("items");
+        const pubsub = XMPPElement.createElementNS(Pubsub.NS.BASE, "pubsub");
+        const items = XMPPElement.createElement("items");
         items.setAttribute("node", node);
         if (max) items.setAttribute("max_items", max.toString());
         if (id) {
-            const item = iq.createElement("item");
+            const item = XMPPElement.createElement("item");
             item.setAttribute("id", id);
             items.appendChild(item);
         }
         pubsub.appendChild(items);
-        iq.documentElement!.appendChild(pubsub);
-        return iq.documentElement!;
+        iq.appendChild(pubsub);
+        return iq;
     }
-    static parseEventEl(eventEl: Element) {
+    static parseEventEl(eventEl: XMPPElement) {
         if (eventEl.namespaceURI !== Pubsub.NS.EVENT)
             throw new Error("不是一个event元素");
-        if (eventEl.getElementsByTagName("items").length > 0) {
+        
+        const itemsEL = eventEl.getElementsByTagName("items")[0];
+        if (itemsEL) {
             // 解析item
-            const itemsEL = eventEl.getElementsByTagName("items")[0];
             const node = itemsEL.getAttribute("node")!;
             const retract = itemsEL.getElementsByTagName("retract");
             const retracts =
@@ -55,14 +73,12 @@ export class Pubsub {
                 const id = itemEL.getAttribute("id") ?? void 0;
                 const publisher = itemEL.getAttribute("publisher") ?? void 0;
                 // 获取直接子元素
-                const children = Array.from(itemEL.childNodes).filter(
-                    (child) =>
-                        child.nodeType === 1)[0];
-                return {
-                    id,
-                    publisher,
-                    [children.nodeName]: children,
-                };
+                const children = itemEL.children.item(0);
+                const result: PubsubEventItem = { id, publisher };
+                if (children) {
+                    result[children.localName] = children;
+                }
+                return result;
             });
             return {
                 event: {
@@ -72,50 +88,71 @@ export class Pubsub {
                 },
             } as Record<"event", PubsubEventItems>;
         }
-        // else if (eventEl.getElementsByTagName("collection").length > 0) {
-        //     return {
-        //         event: {
-        //             collection: eventEl.getElementsByTagName("collection")[0],
-        //         },
-        //     };
-        // } else if (eventEl.getElementsByTagName("configuration").length > 0) {
-        //     return {
-        //         event: {
-        //             configuration: eventEl.getElementsByTagName("configuration")[0],
-        //         },
-        //     };
-        // } else if (eventEl.getElementsByTagName("delete").length > 0) {
-        //     return {
-        //         event: {
-        //             delete: eventEl.getElementsByTagName("delete")[0],
-        //         },
-        //     };
-        // } else if (eventEl.getElementsByTagName("purge").length > 0) {
-        //     return {
-        //         event: {
-        //             purge: eventEl.getElementsByTagName("purge")[0],
-        //         },
-        //     };
-        // } else if (eventEl.getElementsByTagName("subscription").length > 0) {
-        //     return {
-        //         event: {
-        //             subscription: eventEl.getElementsByTagName("subscription")[0],
-        //         },
-        //     };
-        // }
+
+        const collectionEL = eventEl.getElementsByTagName("collection")[0];
+        if (collectionEL) {
+            return {
+                event: {
+                    node: collectionEL.getAttribute("node") ?? undefined,
+                    collection: collectionEL,
+                },
+            } as Record<"event", PubsubEventItems>;
+        }
+
+        const configurationEL = eventEl.getElementsByTagName("configuration")[0];
+        if (configurationEL) {
+            return {
+                event: {
+                    node: configurationEL.getAttribute("node") ?? undefined,
+                    configuration: configurationEL,
+                },
+            } as Record<"event", PubsubEventItems>;
+        }
+
+        const deleteEL = eventEl.getElementsByTagName("delete")[0];
+        if (deleteEL) {
+            return {
+                event: {
+                    node: deleteEL.getAttribute("node") ?? undefined,
+                    delete: deleteEL,
+                },
+            } as Record<"event", PubsubEventItems>;
+        }
+
+        const purgeEL = eventEl.getElementsByTagName("purge")[0];
+        if (purgeEL) {
+            return {
+                event: {
+                    node: purgeEL.getAttribute("node") ?? undefined,
+                    purge: purgeEL,
+                },
+            } as Record<"event", PubsubEventItems>;
+        }
+
+        const subscriptionEL = eventEl.getElementsByTagName("subscription")[0];
+        if (subscriptionEL) {
+            return {
+                event: {
+                    node: subscriptionEL.getAttribute("node") ?? undefined,
+                    subscription: subscriptionEL,
+                },
+            } as Record<"event", PubsubEventItems>;
+        }
+
+        throw new Error("未知的event元素");
     }
 
     /**
      * 构造发布iq
      * @param publish 发布元素
      */
-    static createPublishIq(publish: Element, publishOptions?: Element) {
+    static createPublishIq(publish: XMPPElement, publishOptions?: XMPPElement) {
         const iq = Iq.createIq("set");
-        const pubsub = iq.createElementNS(Pubsub.NS.BASE, "pubsub");
+        const pubsub = XMPPElement.createElementNS(Pubsub.NS.BASE, "pubsub");
         pubsub.appendChild(publish);
-        iq.documentElement!.appendChild(pubsub);
+        iq.appendChild(pubsub);
         if (publishOptions) pubsub.appendChild(publishOptions);
-        return iq.documentElement!;
+        return iq;
     }
 
     /**
@@ -123,22 +160,22 @@ export class Pubsub {
      */
     static createRetractIq(node: string, id: string, notify?: boolean) {
         const iq = Iq.createIq("set");
-        const pubsub = iq.createElementNS(Pubsub.NS.BASE, "pubsub");
-        const retract = iq.createElement("retract");
+        const pubsub = XMPPElement.createElementNS(Pubsub.NS.BASE, "pubsub");
+        const retract = XMPPElement.createElement("retract");
         retract.setAttribute("node", node);
         if (notify) retract.setAttribute("notify", "true");
-        const item = iq.createElement("item");
+        const item = XMPPElement.createElement("item");
         item.setAttribute("id", id);
         retract.appendChild(item);
         pubsub.appendChild(retract);
-        iq.documentElement!.appendChild(pubsub);
-        return iq.documentElement!;
+        iq.appendChild(pubsub);
+        return iq;
     }
 }
 
 declare module "@/stanza" {
-    interface Message<T extends "item" | "retract" = "item" | "retract"> {
+    interface Message {
         /**XEP0060 */
-        event?: PubsubEventItems<T>;
+        event?: PubsubEventItems;
     }
 }

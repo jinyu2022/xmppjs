@@ -11,6 +11,7 @@ const log = logger.getLogger("XEP0045");
 /**
  * XEP-0045: Multi-User Chat
  * @version 1.35.1 (2024-09-17)
+ * @link https://xmpp.org/extensions/xep-0045.html
  */
 export class XEP0045 extends MUC implements Plugin {
     static readonly dependencies = ["XEP0030"] as const;
@@ -120,7 +121,7 @@ export class XEP0045 extends MUC implements Plugin {
         room: string | JID,
         nick: string,
         options?: JoinOptions,
-        timeout = 300_0000
+        timeout = 3_000_000
     ) {
         const pres = XEP0045.createJoinPres(room, nick, options);
         // 服务器在其他用户的存在广播发送完成后才会返回响应

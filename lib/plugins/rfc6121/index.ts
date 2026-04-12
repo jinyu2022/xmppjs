@@ -1,6 +1,8 @@
 import type { Plugin } from "../types";
 import type Connection from "@/connection";
-import { implementation } from "@/shims";
+// import { implementation } from "@/shims";
+import { XMPPElement } from "@/ltx";
+import { Presence, Iq} from "@/stanza";
 import { XMPPError } from "@/errors";
 
 type Subscription = "none" | "to" | "from" | "both" | "remove";
@@ -11,6 +13,11 @@ export interface Roster {
   ask?: 'subscribe';
   subscription: Subscription;
 }
+
+/**
+ * RFC6121: XMPP 即时消息和存在
+ * @see https://datatracker.ietf.org/doc/html/rfc6121
+ */
 class RFC6121 implements Plugin {
   name = "RFC6121: XMPP Instant Messaging and Presence";
   static readonly NS = "jabber:iq:roster" as const;
@@ -30,20 +37,14 @@ class RFC6121 implements Plugin {
 
     // 回应roster更新，本地更新另作处理
     this.connection.on("roster:update", (iq) => {
-      const doc = implementation.createDocument("jabber:client", "iq", null);
-      const iqEl = doc.documentElement!;
-      iqEl.setAttribute("type", "result");
+      const iqEl = Iq.createIq("result");
       iqEl.setAttribute("id", iq.id!);
       this.connection.send(iqEl);
     });
   }
 
   async getRoster() {
-    const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement!;
-    iq.setAttribute("type", "get");
-    const query = doc.createElementNS(RFC6121.NS, "query");
-    iq.appendChild(query);
+    const iq = Iq.createIq("get", void 0, RFC6121.NS);
     const res = await this.connection.sendAsync(iq);
     if (res.getAttribute("type") === "error") {
       throw new XMPPError(res, "获取roster失败");
@@ -55,80 +56,64 @@ class RFC6121 implements Plugin {
   }
 
   async setRoster(jid: string, name?: string, group?: string) {
-    const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement!;
-    iq.setAttribute("type", "set");
-    const query = doc.createElementNS(RFC6121.NS, "query");
-    iq.appendChild(query);
-    const item = doc.createElement("item");
+    const iqEl = Iq.createIq("set", void 0, RFC6121.NS);
+    const item = XMPPElement.createElement("item");
     item.setAttribute("jid", jid);
     if (name) {
       item.setAttribute("name", name);
     }
     if (group) {
-      const groupEl = doc.createElement("group");
+      const groupEl = XMPPElement.createElement("group");
       groupEl.textContent = group;
       item.appendChild(groupEl);
     }
-    query.appendChild(item);
-    const res = await this.connection.sendAsync(iq);
+    iqEl.getElementsByTagNameNS(RFC6121.NS, "query")[0].appendChild(item);
+    const res = await this.connection.sendAsync(iqEl);
     if (res.getAttribute("type") === "error") {
       throw new XMPPError(res, "设置roster失败");
     }
   }
 
   async removeRoster(jid: string) {
-    const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement!;
-    iq.setAttribute("type", "set");
-    const query = doc.createElementNS(RFC6121.NS, "query");
-    iq.appendChild(query);
-    const item = doc.createElement("item");
+    const iq = Iq.createIq("set", void 0, RFC6121.NS);
+    const item = XMPPElement.createElement("item");
     item.setAttribute("jid", jid);
     item.setAttribute("subscription", "remove");
-    query.appendChild(item);
+    iq.getElementsByTagNameNS(RFC6121.NS, "query")[0].appendChild(item);
     const res = await this.connection.sendAsync(iq);
     if (res.getAttribute("type") === "error") {
       throw new XMPPError(res, "删除roster失败");
     }
   }
 
+  /** 请求订阅对方的存在状态 */
   async requestSubscription(jid: string) {
-    const doc = implementation.createDocument("jabber:client", "presence", null);
-    const presence = doc.documentElement!;
-    presence.setAttribute("to", jid);
-    presence.setAttribute("type", "subscribe");
+    const presence = Presence.createPresence(jid, "subscribe");
     this.connection.send(presence);
   }
 
   /** 撤销被订阅/拒绝订阅请求/取消预批准 */
   removeSubscription(jid: string) {
-    const doc = implementation.createDocument("jabber:client", "presence", null);
-    const presence = doc.documentElement!;
-    presence.setAttribute("to", jid);
-    presence.setAttribute("type", "unsubscribed");
+    const presence = Presence.createPresence(jid, "unsubscribed");
     this.connection.send(presence);
   }
 
   /** 取消订阅 */
   cancelSubscribe(jid: string) {
-    const doc = implementation.createDocument("jabber:client", "presence", null);
-    const presence = doc.documentElement!;
-    presence.setAttribute("to", jid);
-    presence.setAttribute("type", "unsubscribe");
+    const presence = Presence.createPresence(jid, "unsubscribe");
+    this.connection.send(presence);
     this.connection.send(presence);
   }
 
   /** 预批准被订阅请求/批准订阅请求 */
   approveSubscription(jid: string) {
-    const doc = implementation.createDocument("jabber:client", "presence", null);
-    const presence = doc.documentElement!;
+    const presence = XMPPElement.createElementNS("jabber:client", "presence");
     presence.setAttribute("to", jid);
     presence.setAttribute("type", "subscribed");
     this.connection.send(presence);
   }
   
-  static parseRseterEl(el: Element): {roster:Roster[]} {
+  static parseRseterEl(el: XMPPElement): {roster:Roster[]} {
     if (el.namespaceURI !== RFC6121.NS) throw new Error("不是一个roster");
     const items = el.getElementsByTagName("item");
     const rosters = Array.from(items).map((item) => {
@@ -145,7 +130,7 @@ class RFC6121 implements Plugin {
   }
 }
 
-import type { Iq } from "@/stanza";
+
 declare module "../../connection" {
   export interface SocketEventMap {
     /** RFC6121，你自己根据subscription判断是添还是删除 */

@@ -23,5 +23,5 @@ dist-ssr
 *.sln
 *.sw?
 
-/lib/test/
+.github/*
 package-lock.json

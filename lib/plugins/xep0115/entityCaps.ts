@@ -1,6 +1,6 @@
 import { XMPPError } from "@/errors";
 import { arrayBufToBase64 } from "@/auth/scram";
-import { implementation } from "@/shims";
+import { XMPPElement } from "@/ltx/Element";
 import type { Identity } from "../xep0030/disco";
 import type { DataForm } from "../xep0004/form";
 export interface Capabilities {
@@ -8,10 +8,16 @@ export interface Capabilities {
   ver: string;
   hash: string;
 }
+
+/**
+ * XEP-0115: Entity Capabilities 实体能力
+ * @see https://xmpp.org/extensions/xep-0115.html
+ * @version 1.6.0 (2022-03-08)
+ */
 export class EntityCaps {
   static readonly NS = "http://jabber.org/protocol/caps" as const;
 
-  static parseCaps(caps: Element): { cap: Capabilities } {
+  static parseCaps(caps: XMPPElement): { cap: Capabilities } {
     if (caps.namespaceURI !== EntityCaps.NS)
       throw new XMPPError(caps, "不是实体能力命名空间");
     const node = caps.getAttribute("node")!;
@@ -102,8 +108,7 @@ export class EntityCaps {
   }
 
   static createCapsElement(cpas: Capabilities) {
-    const c = implementation.createDocument(EntityCaps.NS, "c", null)
-      .documentElement!;
+    const c = XMPPElement.createElementNS(EntityCaps.NS, "c");
     c.setAttribute("hash", cpas.hash);
     c.setAttribute("ver", cpas.ver);
     c.setAttribute("node", cpas.node);

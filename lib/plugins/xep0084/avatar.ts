@@ -1,6 +1,7 @@
 import { PEP } from "../xep0163/pep";
 import { implementation } from "@/shims";
 import { JID } from "@/JID";
+import { XMPPElement } from "@/ltx";
 
 export interface AvatarMetadata {
     id: string;
@@ -64,7 +65,7 @@ export class Avatar {
             webp: "image/webp",
             svg: "image/svg+xml",
         } as const;
-        const { readFile, stat } = await import("fs/promises");
+        const { readFile, stat } = await import("node:fs/promises");
         // 获取文件信息和内容
         const [fileStats, fileBuffer] = await Promise.all([
             stat(imagePath),
@@ -99,6 +100,11 @@ export class Avatar {
         };
     }
 
+    /**
+     * 解析图片
+     * @param image node下绝对路径，浏览器下File对象
+     * @returns base64编码的图片与图片元数据
+     */
     static async imageParser(
         image: File | string
     ): Promise<{ base64Data: string; metadata: AvatarMetadata; }> {
@@ -164,7 +170,7 @@ export class Avatar {
         return PEP.createRetrieveItemsIq(to, Avatar.NS.data, 1, id);
     }
 
-    static parseMetadataEl(metadata: Element) {
+    static parseMetadataEl(metadata: XMPPElement) {
         if (metadata.namespaceURI !== Avatar.NS.metadata)
             throw new Error("不是一个metadata元素");
         const infoEl = metadata.getElementsByTagName("info")[0];

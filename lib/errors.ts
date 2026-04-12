@@ -1,4 +1,5 @@
-import { xmlSerializer } from "./shims";
+import { XMPPElement } from "./ltx/Element";
+// import { xmlSerializer } from "./shims";
 export const ErrorConditions = [
   "bad-request",
   "conflict",
@@ -39,13 +40,13 @@ export class XMPPError extends Error {
   readonly to: string | null;
   readonly from: string | null;
 
-  constructor(stanza: Element, message: string) {
+  constructor(stanza: XMPPElement, message: string) {
     super(message);
     this.name = "XMPPError";
     this.tagName = stanza.tagName;
     this.to = stanza.getAttribute("to");
     this.from = stanza.getAttribute("from");
-    this.xmlString = xmlSerializer.serializeToString(stanza);
+    this.xmlString = stanza.toXMLString();
 
     const error = stanza.getElementsByTagName("error")[0];
     if (!error) return;

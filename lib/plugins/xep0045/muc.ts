@@ -3,6 +3,7 @@ import { JID } from "../../JID";
 import { implementation, xmlSerializer } from "../../shims";
 import { Form, DataForm } from "../xep0004/form";
 import { MUCUserPres } from "./typing";
+import type { XMPPElement } from "../../ltx";
 import logger from "@/log";
 
 const log = logger.getLogger("MUC");
@@ -303,9 +304,9 @@ export class MUC {
    * message节也可能有muc#user，但只是标识，不包含具体信息，直接返回空对象
    * @param presence
    */
-  static parsePresUser(xEl: Element): Record<"muc", MUCUserPres> | Record<"muc", Record<never, never>> {
+  static parsePresUser(xEl: XMPPElement): Record<"muc", MUCUserPres> | Record<"muc", object> {
     // message节也可能有muc#user，但只是标识，不包含具体信息，直接返回空对象
-    if (!xEl.hasChildNodes()) return { muc: {} };
+    if (xEl.tagName !== "x") return { muc: {} };
 
     const declineEl = xEl.getElementsByTagName("decline")[0];
     if (declineEl) {

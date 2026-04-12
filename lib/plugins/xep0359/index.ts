@@ -3,7 +3,8 @@ import type { Plugin } from "../types";
 import type Connection from "@/connection";
 /**
  * XEP-0359: Unique and Stable Stanza IDs  
- * version: 0.7.0 (2023-02-20)
+ * @see https://xmpp.org/extensions/xep-0359.html
+ * @version: 0.7.0 (2023-02-20)
  */
 export class XEP0359 extends StanzaID implements Plugin {
     static readonly dependencies = ["XEP0030"] as const;

@@ -6,6 +6,7 @@ import { XMPPError } from "@/errors";
 import { XEP0153 } from "../xep0153";
 /**
  * XEP-0486: MUC Avatars
+ * @see https://xmpp.org/extensions/xep-0486.html
  * @version 0.1.0 (2024-03-10)
  */
 export class XEP0486 extends MUCAvatars implements Plugin {

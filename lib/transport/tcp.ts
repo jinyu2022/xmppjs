@@ -1,7 +1,7 @@
-import { Socket } from "net";
-import { connect as tlsConnect, TLSSocket } from "tls";
+import { Socket } from "node:net";
+import { connect as tlsConnect, TLSSocket } from "node:tls";
 import { resolveXMPPSrv } from "../dns";
-import { domParser, xmlSerializer } from "@/shims";
+import { XMPPElement, Parser } from "@/ltx";
 import { XMPPError, TimeoutError } from "@/errors";
 import { EntityCaps, Capabilities } from "@/plugins/xep0115/entityCaps";
 import { Status, SaslData } from "./typing";
@@ -20,8 +20,7 @@ interface SocketEventMap {
   "stream:start": void;
   "stream:negotiated": void;
   "stream:end": void;
-  "net:message": string;
-  "session:start": void;
+  "stanza": XMPPElement;
   "session:end": never;
   binded: void;
 }
@@ -29,19 +28,19 @@ interface SocketEventMap {
 interface XMPPConnection {
   on<E extends keyof SocketEventMap>(
     event: E,
-    listener: (arg: SocketEventMap[E]) => void
+    listener: (arg: SocketEventMap[E]) => void,
   ): this;
   once<E extends keyof SocketEventMap>(
     event: E,
-    listener: (arg: SocketEventMap[E]) => void
+    listener: (arg: SocketEventMap[E]) => void,
   ): this;
   emit<E extends keyof SocketEventMap>(
     event: E,
-    arg?: SocketEventMap[E]
+    arg?: SocketEventMap[E],
   ): boolean;
   off<E extends keyof SocketEventMap>(
     event: E,
-    listener: (arg: SocketEventMap[E]) => void
+    listener: (arg: SocketEventMap[E]) => void,
   ): this;
 }
 /**
@@ -57,12 +56,15 @@ class XMPPConnection extends EventEmitter {
   private readonly domain: string;
   private host: string;
   private port = "5222";
-  private readonly tls: boolean; // 是否使用TLS
-  status = 0; // 连接状态
+  /** 是否使用TLS */
+  private readonly tls: boolean;
+  /** 连接状态 */
+  status = 0;
   /** 流特性 */
   streamFeatures: Set<string> = new Set();
   entityCaps?: Capabilities;
   private readonly sasl: SaslData = {};
+  private readonly parser: Parser;
 
   /**
    * 创建XMPP连接实例
@@ -75,6 +77,7 @@ class XMPPConnection extends EventEmitter {
     this.domain = jid.domain;
     this.host = jid.domain;
     this.resource = jid.resource ?? Math.random().toString(32).slice(2, 8);
+    this.parser = new Parser();
   }
 
   async connect(url?: string) {
@@ -120,7 +123,8 @@ class XMPPConnection extends EventEmitter {
    * 设置Socket事件监听器
    */
   private setupSocketListeners(): void {
-    this.socket!.once("connect", () => {
+    if (!this.socket) throw new Error("Socket未初始化");
+    this.socket.once("connect", () => {
       log.info("连接成功");
       this.status = Status.CONNECTED;
       const startStream = `<?xml version="1.0"?><stream:stream to="${this.domain}" version="1.0" xmlns="jabber:client" xmlns:stream="http://etherx.jabber.org/streams">`;
@@ -129,18 +133,56 @@ class XMPPConnection extends EventEmitter {
       this.emit("connect");
     });
 
-    this.socket!.on("data", (data: string) => {
-      this.onData(data.toString());
+    this.socket.on("data", (data: Buffer) => {
+      console.log("收到数据:", data.toString());
+      this.parser.write(data.toString());
     });
+    // const onStream = (tagName: string, _: unknown) => {
+    //   if (this.status === Status.BINDING) {
+    //     // 不会出现流头了，移除监听器
+    //     this.parser.removeListener("startElement", onStream);
+    //     return;
+    //   }
+    //   if (this.status >= Status.BINDING) {
+    //     log.warn("收到多余的流头，忽略之");
+    //     return;
+    //   }
 
-    this.socket!.on("error", (error) => {
+    //   if (this.status < Status.BINDING) {
+    //     if (
+    //       this.status === Status.STREAM_START &&
+    //       tagName === "stream:stream"
+    //     ) {
+    //       log.debug("收到流头，开始认证");
+    //       // 流建立成功，重置解析器，忽略流头
+    //       this.parser.reset();
+    //       this.status = Status.STREAM_ESTABLISHED;
+    //       return;
+    //     } else if (
+    //       this.status === Status.AUTHENTICATED &&
+    //       tagName === "stream:stream"
+    //     ) {
+    //       log.debug("认证成功的流头");
+    //       // 流建立成功，重置解析器，忽略流头
+    //       this.parser.reset();
+    //       return;
+    //     }
+    //   }
+    // };
+
+    // this.parser.on("startElement", onStream);
+    this.parser.on("tree", (stanza) => {
+      console.log("解析到完整stanza:", stanza.tagName);
+      this.onStanza(stanza);
+    });
+    this.socket.on("error", (error) => {
       log.error("连接错误", error);
       this.emit("error", error);
       // 应该立刻关闭当前连接，并尝试重连
       this.close();
     });
 
-    this.socket!.on("close", () => {
+    this.socket.on("close", () => {
       if (this.status !== Status.SESSIONEND) {
         this.status = Status.SESSIONEND;
         this.emit("session:end");
@@ -149,80 +191,81 @@ class XMPPConnection extends EventEmitter {
       // 移除所有监听器
       // this.removeAllListeners();
       this.socket?.removeAllListeners();
+      // 移除parser的监听器，防止重连时重复添加导致内存泄漏
+      this.parser.removeAllListeners();
       this.status = Status.DISCONNECTED;
       this.emit("disconnect");
       // this.handleReconnect();
     });
   }
 
-  private onData(data: string) {
-    if (this.status < Status.AUTHENTICATED) {
-      this.authenticateUser(data);
+  private onStanza(stanza: XMPPElement) {
+    console.log("onStanza状态:", this.status, "标签:", stanza.tagName);
+    if (this.status === Status.STREAM_START && stanza.tagName === "stream:features") {
+      this.status = Status.STREAM_ESTABLISHED;
+      this.authenticateUser(stanza);
+    } else if (this.status < Status.AUTHENTICATED) {
+      this.authenticateUser(stanza);
     } else if (this.status < Status.BINDING) {
-      if (data.includes("</stream:features>")) {
+      if (stanza.tagName === "stream:features") {
         // 获取所有特性
-        const features = domParser.parseFromString(data, "text/xml")
-          .documentElement!;
 
-        for (const feature of features.childNodes) {
+        for (const feature of stanza.childNodes as XMPPElement[]) {
+          // TODO: 应该判断当前节点类型
           if (feature.namespaceURI) {
             this.streamFeatures.add(feature.namespaceURI);
           }
         }
-        // this.emit("stream:negotiated");
-      }
-      this.bindResource(data);
-    } else {
-      if (data.includes("</stream:features>")) {
-        // 获取所有特性
-        this.parseStreamFeatures(data);
         this.emit("stream:negotiated");
-      } else if (data.includes("stream:stream")) {
-        return;
-      } else {
-        this.emit("net:message", data);
       }
+      this.bindResource(stanza);
+    }  else {
+        // this.emit("net:message", data);
+      this.emit("stanza", stanza);
+      // console.log("收到消息");
     }
   }
 
   /**
    * 解析流特性
    */
-  private parseStreamFeatures(data: string) {
-    const features = domParser.parseFromString(data, "text/xml")
-      .documentElement!;
-    for (const feature of features.childNodes) {
-      if (feature.namespaceURI) {
-        this.streamFeatures.add(feature.namespaceURI);
-        if (feature.namespaceURI === EntityCaps.NS) {
-          this.entityCaps = EntityCaps.parseCaps(feature as Element).cap;
-        }
-      }
-    }
-  }
+  // private parseStreamFeatures(features: XMPPElement) {
+  //   for (const feature of features.childNodes as XMPPElement[]) {
+  //     if (feature.namespaceURI) {
+  //       this.streamFeatures.add(feature.namespaceURI);
+  //       if (feature.namespaceURI === EntityCaps.NS) {
+  //         this.entityCaps = EntityCaps.parseCaps(feature).cap;
+  //       }
+  //     }
+  //   }
+  // }
 
   /**
    * 发送数据
    * @param data 要发送的数据
    * @returns 是否发送成功
    */
-  send(data: string | Element) {
+  send(data: string | XMPPElement) {
     if (this.socket == null) throw new Error("连接已断开");
     if (typeof data !== "string") {
-      data = xmlSerializer.serializeToString(data);
+      data = data.toXMLString();
     }
     try {
       this.socket.write(data);
     } catch (error) {
       log.error("发送失败", error);
-      this.disconnect();
+      if (data === "</stream:stream>") {
+        log.warn("发送流关闭标签失败，可能是连接已断开");
+      }else {
+        this.disconnect();
+      }
     }
   }
 
-  sendAsync(data: string | Element, timeout = 30000): Promise<Element> {
-    let xml: Element | null;
+  sendAsync(data: string | XMPPElement, timeout = 30000): Promise<XMPPElement> {
+    let xml: XMPPElement;
     if (typeof data === "string") {
-      xml = domParser.parseFromString(data, "text/xml").documentElement;
+      xml = Parser.parse(data);
       if (!xml) throw new Error("无效的XML字符串");
     } else {
       xml = data;
@@ -232,7 +275,7 @@ class XMPPConnection extends EventEmitter {
     if (!id) throw new XMPPError(xml, "缺少id属性");
 
     return new Promise((resolve, reject) => {
-      const onResponse = (response: string) => {
+      const onResponse = (response: XMPPElement) => {
         // XXX: xmldom有bug，无法解析stream:feature标签，提示缺少命名空间
         // try{
         //     domParser.parseFromString(response, "text/xml");
@@ -241,23 +284,21 @@ class XMPPConnection extends EventEmitter {
         //     log.error("发送的内容", data);
         //     return;
         // }
-        const resElement = domParser.parseFromString(response, "text/xml")
-          .documentElement!;
-        const responseId = resElement.getAttribute("id");
+        const responseId = response.getAttribute("id");
         if (responseId === id) {
           // 收到匹配的响应，解除监听并解析 Promise
-          this.off("net:message", onResponse);
+          this.off("stanza", onResponse);
           clearTimeout(timer);
-          resolve(resElement);
+          resolve(response);
         }
       };
 
       // 监听全局事件
-      this.on("net:message", onResponse);
+      this.on("stanza", onResponse);
 
       // 处理超时
       const timer = setTimeout(() => {
-        this.off("net:message", onResponse);
+        this.off("stanza", onResponse);
         reject(new TimeoutError(`请求超时: ${id}`));
       }, timeout);
 
@@ -275,92 +316,72 @@ class XMPPConnection extends EventEmitter {
     }
   }
 
-  private async authenticateUser(data: string) {
-    if (this.status === Status.STREAM_START) {
-      if (data.includes("<?xml version='1.0'?>")) {
-        this.status = Status.STREAM_ESTABLISHED;
-        log.debug("开始xmpp流");
-      }
-    } else if (this.status === Status.STREAM_ESTABLISHED) {
-      if (data.includes("stream:features") && data.includes("mechanisms")) {
-        log.debug("开始认证");
-        // HACK: xmldom有bug，无法解析stream:features标签
-        // 添加一个根元素
-        data = `<root xmlns:stream="http://etherx.jabber.org/streams">${data}</root>`;
-        // 解析XML
-        const doc = domParser.parseFromString(data, "text/xml");
-        const xml = doc.documentElement!;
-        // 获取所有的 mechanism 元素
-        const mechanisms = xml.getElementsByTagName("mechanism");
+  private async authenticateUser(stanza: XMPPElement) {
+    if (this.status === Status.STREAM_ESTABLISHED) {
+      log.debug("开始认证");
+      // 获取所有的 mechanism 元素
+      const mechanisms = stanza.getElementsByTagName("mechanism");
+      /* 安全等级映射 */
+      const securityLevels = {
+        PLAIN: 2, // 中等安全性
+        "SCRAM-SHA-1": 3, // 最高安全性
+      } as const;
+      // 提取机制名称并排序
+      const supportedMechanisms = Array.from(mechanisms)
+        .map((mechanism) => mechanism.textContent)
+        .filter((mechanism) => mechanism in securityLevels)
+        .sort(
+          (a, b) =>
+            (securityLevels[b as keyof typeof securityLevels] ?? 0) -
+            (securityLevels[a as keyof typeof securityLevels] ?? 0),
+        ) as Array<keyof typeof securityLevels>;
 
-        /* 安全等级映射 */
-        const securityLevels = {
-          PLAIN: 2, // 中等安全性
-          "SCRAM-SHA-1": 3, // 最高安全性
-        } as const;
-        // 提取机制名称并排序
-        const supportedMechanisms = Array.from(mechanisms)
-          .map((mechanism) => mechanism.textContent!)
-          .filter((mechanism) => mechanism in securityLevels)
-          .sort(
-            (a, b) =>
-              (securityLevels[b as keyof typeof securityLevels] ?? 0) -
-              (securityLevels[a as keyof typeof securityLevels] ?? 0)
-          ) as Array<keyof typeof securityLevels>;
+      // 选择最高安全等级的机制
+      const selectedMechanism = supportedMechanisms[0];
+      if (!selectedMechanism) throw new Error("不受支持的认证机制");
 
-        // 选择最高安全等级的机制
-        const selectedMechanism = supportedMechanisms[0];
-        if (!selectedMechanism) throw new Error("不受支持的认证机制");
-
-        this.sasl.mechanism = selectedMechanism;
-        if (selectedMechanism === "PLAIN") {
-          this.plainAuth(data);
-        } else {
-          this.scramAuth(data);
-        }
+      this.sasl.mechanism = selectedMechanism;
+      if (selectedMechanism === "PLAIN") {
+        this.plainAuth(stanza);
+      } else {
+        this.scramAuth(stanza);
       }
     } else {
       if (this.sasl.mechanism === "PLAIN") {
-        this.plainAuth(data);
+        this.plainAuth(stanza);
       } else {
-        this.scramAuth(data);
+        this.scramAuth(stanza);
       }
     }
   }
 
-  private async scramAuth(data: string) {
+  private async scramAuth(stanza: XMPPElement) {
     if (this.status === Status.STREAM_ESTABLISHED) {
       this.sasl.clientFirstMessageBare = `n=${
         this.jid.local
       },r=${generateSecureNonce()}`;
       const auth = `<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='SCRAM-SHA-1'>${btoa(
-        `n,,${this.sasl.clientFirstMessageBare}`
+        `n,,${this.sasl.clientFirstMessageBare}`,
       )}</auth>`;
       this.send(auth);
       this.status = Status.AUTHENTICATING;
     } else if (this.status === Status.AUTHENTICATING) {
-      log.debug("scramAuth", data);
-      if (data.includes("challenge")) {
-        const challenge = domParser.parseFromString(data, "text/xml")
-          .documentElement!;
-        const serverFirstMessage = challenge.textContent!;
+      log.debug("scramAuth", stanza.toXMLString());
+      if (stanza.tagName === "challenge") {
+        const serverFirstMessage = stanza.textContent;
         const { clientResponse, serverProof } = await scramResponse(
           this.password,
           serverFirstMessage,
           this.sasl.clientFirstMessageBare!,
-          this.sasl.mechanism as "SCRAM-SHA-1"
+          this.sasl.mechanism as "SCRAM-SHA-1",
         );
         this.sasl.serverProof = serverProof;
 
         // 发送响应
         const responseXML = `<response xmlns="urn:ietf:params:xml:ns:xmpp-sasl">${clientResponse}</response>`;
         this.send(responseXML);
-      } else if (data.includes("success")) {
-        // 认证成功
-        this.status = Status.AUTHENTICATED;
-        const xml = domParser.parseFromString(data, "text/xml")
-          .documentElement!;
-        const v = atob(xml.textContent).split("v=")[1];
+      } else if (stanza.tagName === "success") {
+        const v = atob(stanza.textContent).split("v=")[1];
         if (!v) throw new Error("无法解析服务器签名");
         log.debug("v", v);
 
@@ -376,29 +397,29 @@ class XMPPConnection extends EventEmitter {
         // 重新开始xmpp流
         const stream = `<?xml version='1.0'?><stream:stream to="${this.domain}" version="1.0" xmlns="jabber:client" xmlns:stream="http://etherx.jabber.org/streams">`;
         this.send(stream);
-      } else if (data.includes("failure")) {
+      } else if (stanza.tagName === "failure") {
         this.status = Status.AUTHFAIL;
         this.disconnect();
         throw new Error("认证失败");
       }
     }
   }
-  private plainAuth(data: string) {
+  private plainAuth(stanza: XMPPElement) {
     if (this.status === Status.STREAM_ESTABLISHED) {
       const auth = `<auth xmlns='urn:ietf:params:xml:ns:xmpp-sasl' mechanism='PLAIN'>${btoa(
-        `\x00${this.jid.local}\x00${this.password}`
+        `\x00${this.jid.local}\x00${this.password}`,
       )}</auth>`;
       this.send(auth);
       this.status = Status.AUTHENTICATING;
     } else if (this.status === Status.AUTHENTICATING) {
-      if (data.includes("success")) {
+      if (stanza.tagName === "success") {
         this.status = Status.AUTHENTICATED;
         log.info("认证成功");
         this.emit("authenticated");
         // 重新开始xmpp流
         const stream = `<stream:stream to="${this.domain}" version="1.0" xmlns="jabber:client" xmlns:stream="http://etherx.jabber.org/streams">`;
         this.send(stream);
-      } else if (data.includes("failure")) {
+      } else if (stanza.tagName === "failure") {
         this.status = Status.AUTHFAIL;
         this.disconnect();
         throw new Error("认证失败");
@@ -406,9 +427,9 @@ class XMPPConnection extends EventEmitter {
     }
   }
 
-  private bindResource(data: string) {
+  private bindResource(stanza: XMPPElement) {
     if (
-      data.includes("urn:ietf:params:xml:ns:xmpp-bind") &&
+      stanza.getElementsByTagName("bind").length > 0 &&
       this.status === Status.AUTHENTICATED
     ) {
       this.status = Status.BINDING;
@@ -442,7 +463,7 @@ class XMPPConnection extends EventEmitter {
 
   private close(): void {
     this.socket?.end();
-    this.socket?.destroy();
+    // this.socket?.destroy();
     log.info("关闭tcp连接");
     // this.socket = null;
   }

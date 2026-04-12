@@ -22,7 +22,7 @@ const STATE_ATTR_QUOT = 7;
 const STATE_ATTR_VALUE = 8;
 /** CDATA 内容状态 */
 const STATE_CDATA = 9;
-// const STATE_IGNORE_CDATA = 10; // 原始代码中未使用，此处省略
+const STATE_IGNORE_CDATA = 10; // 原始代码中未使用，此处省略
 /**
  * LtxParser 事件类型映射定义
  */
@@ -150,10 +150,10 @@ export class LtxParser extends EventEmitter {
           break;
         }
         case STATE_CDATA: {
-          // CDATA 忽略状态：跳到 ']]>' 结尾
+          // CDATA 状态：跳到 ']]>' 结尾
           const endCDATA = currentData.indexOf("]]>", pos);
           if (endCDATA !== -1) {
-            pos = endCDATA + 2; // 指向 '>' 字符
+            pos = endCDATA; // 指向 ']' 字符
           }
           break;
         }
@@ -181,14 +181,12 @@ export class LtxParser extends EventEmitter {
         case STATE_CDATA:
           // CDATA 内部直接输出原始文本，直到检测到 ']]>' 结束标记
           if (c === 93 /* ] */) {
-            if (currentData.substring(pos + 1, pos + 3) === "]>") {
+            if (currentData.substr(pos + 1, 2) === "]>") {
               const cData = endRecording();
               if (cData) {
                 this.emit("text", cData);
               }
               this.state = STATE_TEXT;
-              this.recordStart = pos + 3; // 跳过 ']]>'
-              pos += 2; // 额外跳过 ']]'
             } else if (currentData.length < pos + 2) {
               // 剩余数据不足，等待下一次写入继续判断
               this.parseRemainder = true;
@@ -204,7 +202,7 @@ export class LtxParser extends EventEmitter {
             this.endTag = true;
           } else if (c === 33 /* ! */) {
             // 可能是 CDATA 或注释
-            if (currentData.substring(pos + 1, pos + 8) === "[CDATA[") {
+            if (currentData.substr(pos + 1, 7) === "[CDATA[") {
               this.recordStart = pos + 8; // 跳过 '[CDATA['
               this.state = STATE_CDATA;
               pos += 7;

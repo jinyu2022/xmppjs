@@ -1,19 +1,21 @@
 import { StreamManagement } from "./streamManagement";
 import type { Plugin } from "../types";
 import type Connection from "@/connection";
-import { xmlSerializer } from "@/shims";
 import { StanzaBase } from "@/stanza";
 import { TimeoutError, XMPPError } from "@/errors";
 import { Status } from "@/transport/typing";
 import logger from "@/log";
+import type { XMPPElement } from "@/ltx/Element";
 const log = logger.getLogger("XEP0198");
 
-// 声明属性
-enum StreamStatus {
-    DISABLE = 0,
-    ENABLE_SENT = 1,
-    ENABLE = 2,
-}
+const StreamStatus = {
+    /**未启用 */
+    DISABLE: 0,
+    /**已向服务器发送启用（enable）请求，正等待确认 */
+    ENABLE_SENT: 1,
+    /**已启用流管理 */
+    ENABLE: 2,
+} as const;
 /**
  * XEP-0198 Stream Management
  * @see https://xmpp.org/extensions/xep-0198.html
@@ -28,15 +30,20 @@ export default class XEP0198 extends StreamManagement implements Plugin {
     /** 接受的stanza数量 */
     private inbound: number = 0;
     /** 请求确认的消息间隔数 */
-    private readonly interval = 5;
+    static interval = 5;
     /** 流管理状态 */
-    private status: StreamStatus = StreamStatus.DISABLE;
+    private status: typeof StreamStatus[keyof typeof StreamStatus] = StreamStatus.DISABLE;
     /** 最大恢复时间(秒) */
     private max = 300;
     /** 会话恢复ID */
     private previd: string = "";
     /** 服务器位置信息 */
     private location?: string;
+    /** 当前重连尝试次数 */
+    private reconnectAttempts = 0;
+    /** 重连定时器 */
+    private reconnectTimer?: number;
+
     constructor(connection: Connection) {
         super();
         this.connection = connection;
@@ -46,8 +53,8 @@ export default class XEP0198 extends StreamManagement implements Plugin {
         this.connection.registerInterceptor("send", (stanza) => {
             if (this.status >= StreamStatus.ENABLE_SENT && ["iq", "message", "presence"].includes(stanza.tagName)) {
                 this.outbound++;
-                log.info(`发送消息${xmlSerializer.serializeToString(stanza)}，当前发送数量：${this.outbound}`);
-                // 确认已经发送后再检查
+                log.info(`当前发送数量：${this.outbound}`);
+                // 确认已经发送后再检查，利用事件循环的特性确保发送完成
                 Promise.resolve().then(() => this.requestAckAndCheck());
             }
             return stanza;
@@ -77,32 +84,51 @@ export default class XEP0198 extends StreamManagement implements Plugin {
         });
         this.connection.on("session:end", () => {
             if (this.status < StreamStatus.ENABLE) return log.info('未启用流管理，无需恢复');
-            // 获取所有注册的 disconnect 事件监听器
+            this.reconnectAttempts = 0;
+            this.attemptReconnect();
+        });
+    }
+
+    /**
+     * 尝试重连（带指数退避）
+     */
+    private async attemptReconnect() {
+        if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+
+        // 指数退避计算：2^n 秒
+        const delay = Math.min(Math.pow(2, this.reconnectAttempts) * 1000, this.max * 1000);
+        log.info(`准备重连，尝试次数: ${this.reconnectAttempts + 1}, 等待时间: ${delay}ms`);
+
+        this.reconnectTimer = setTimeout(() => {
             const listeners = this.connection.listeners("disconnect");
-            // 清除所有 disconnect 事件监听器
             this.connection.removeAllListeners("disconnect");
-            // 重新连接
-            try {
-                log.info('重新连接');
-                this.connection.socket!.connect().then(() => {
+
+            this.connection.socket!.connect()
+                .then(() => {
+                    this.reconnectAttempts = 0;
                     this.connection.socket!.once("authenticated", () => {
                         this.connection.socket!.status = Status.RECONNECTING;
                     });
                     this.connection.socket!.once("stream:negotiated", () => {
-                        log.info('重新连接成功');
+                        log.info('重连成功，尝试恢复会话');
                         this.resume();
                     });
                     this.connection._setupSocketEvents();
+                })
+                .catch((e) => {
+                    log.error(`重连失败 (${this.reconnectAttempts + 1}):`, e.message);
+                    this.reconnectAttempts++;
+                    
+                    // 超过最大恢复时间限制则放弃
+                    if (this.reconnectAttempts * 2 > this.max) {
+                        log.error('已超过最大恢复时间，彻底断开');
+                        this.status = StreamStatus.DISABLE; 
+                        listeners.forEach(listener => listener());
+                        return;
+                    }
+                    this.attemptReconnect();
                 });
-            } catch (e) {
-                log.error('重连失败', e);
-                this.status = StreamStatus.DISABLE;
-                // 触发所有 disconnect 事件监听器
-                for (const listener of listeners) {
-                    listener();
-                }
-            }
-        });
+        }, delay);
     }
 
     bindHandler() {
@@ -114,7 +140,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
      */
     enable() {
         log.info('正在启用流管理...');
-        return new Promise<Element>((resolve, reject) => {
+        return new Promise<XMPPElement>((resolve, reject) => {
             const onResponse = (response: StanzaBase) => {
                 // 匹配NS
                 if (response.xml.namespaceURI === XEP0198.NS) {
@@ -133,7 +159,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
 
                     this.previd = xml.getAttribute("id")!;
                     if (xml.getAttribute("max")) {
-                        this.max = parseInt(xml.getAttribute("max")!);
+                        this.max = Number.parseInt(xml.getAttribute("max")!);
                         log.info(`设置最大恢复时间: ${this.max}秒`);
                     }
                     if (xml.getAttribute("location")) {
@@ -166,7 +192,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
      */
     requestAckAndCheck() {
         if (this.status < StreamStatus.ENABLE) return;
-        if (this.outbound !== 0 && this.outbound % this.interval === 0) {
+        if (this.outbound !== 0 && this.outbound % XEP0198.interval === 0) {
             log.info("发送确认请求，当前数量", this.outbound);
             this.requestAck()
                 .then(([h, outbound]) => {
@@ -192,7 +218,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
      */
     private async resume() {
         log.info(`尝试恢复会话，previd: ${this.previd}, inbound: ${this.inbound}`);
-        return new Promise<Element>((resolve, reject) => {
+        return new Promise<XMPPElement>((resolve, reject) => {
             const onResponse = (response: StanzaBase) => {
                 if (response.xml.namespaceURI === XEP0198.NS) {
                     this.connection.off("others", onResponse);
@@ -202,12 +228,12 @@ export default class XEP0198 extends StreamManagement implements Plugin {
                         log.error("恢复失败");
                         reject(new XMPPError(xml, "恢复失败"));
                     }
-                    if (parseInt(xml.getAttribute("h")!) !== this.outbound) {
+                    if (Number.parseInt(xml.getAttribute("h")!) !== this.outbound) {
                         log.warn(
                             `服务器返回的处理的数量与本地不一致，local:${this.outbound
                             }, server:${xml.getAttribute("h")}`
                         );
-                        this.outbound = parseInt(xml.getAttribute("h")!);
+                        this.outbound = Number.parseInt(xml.getAttribute("h")!);
                         //TODO: 重新发送未确认的消息
                     }
                     log.info("恢复成功");
@@ -254,7 +280,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
                     this.connection.off("others", onResponse);
                     log.info("收到确认", response.toString());
                     clearTimeout(timer);
-                    resolve([parseInt(response.xml.getAttribute("h")!), this.outbound]);
+                    resolve([Number.parseInt(response.xml.getAttribute("h")!), this.outbound]);
                 }
             };
 

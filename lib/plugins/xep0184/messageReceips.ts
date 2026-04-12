@@ -1,9 +1,9 @@
 import { XMPPError } from "@/errors";
-import { implementation } from "@/shims";
+import { XMPPElement } from "@/ltx/Element";
 export class MessageReceips {
     static readonly NS = "urn:xmpp:receipts" as const;
 
-    static parseReceipts(xml: Element) {
+    static parseReceipts(xml: XMPPElement) {
         if (xml.namespaceURI !== MessageReceips.NS) throw new XMPPError(xml, "不是消息回执命名空间");
         return {
             receipts: {
@@ -14,12 +14,12 @@ export class MessageReceips {
     }
 
     // 重载签名
-    static createReceiptsEl(type: "request"): Element;
-    static createReceiptsEl(type: "received", id: string): Element;
+    static createReceiptsEl(type: "request"): XMPPElement;
+    static createReceiptsEl(type: "received", id: string): XMPPElement;
     
     // 实现
-    static createReceiptsEl(type: "received" | "request", id?: string): Element {
-        const message = implementation.createDocument(MessageReceips.NS, type).documentElement!;
+    static createReceiptsEl(type: "received" | "request", id?: string): XMPPElement {
+        const message = XMPPElement.createElementNS(MessageReceips.NS, type);
         if (type === "received") {
             if (!id) throw new Error("回执请求需要提供消息ID");
             message.setAttribute("id", id);

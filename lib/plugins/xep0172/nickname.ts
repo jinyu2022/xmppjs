@@ -1,9 +1,10 @@
-import { implementation } from "@/shims";
+import { XMPPElement } from "@/ltx/Element";
+import { Presence, Message, Iq } from "@/stanza";
 import { PEP } from "../xep0163/pep";
 export class Nickname {
     static readonly NS = "http://jabber.org/protocol/nick" as const;
 
-    static parseNickEl(nick: Element) {
+    static parseNickEl(nick: XMPPElement) {
         if (nick.namespaceURI !== Nickname.NS) throw new Error("不是一个nick元素");
         return {
             nick: nick.textContent,
@@ -11,25 +12,19 @@ export class Nickname {
     }
 
     static createNickSubscribe(to: string, nick: string) {
-        const pres = implementation.createDocument("jabber:client", "presence", null);
-        pres.documentElement!.setAttribute("to", to);
-        const nickEl = pres.createElementNS(Nickname.NS, "nick");
+        const pres = Presence.createPresence(to);
+        const nickEl = XMPPElement.createElementNS(Nickname.NS, "nick");
         nickEl.textContent = nick;
-        pres.documentElement!.appendChild(nickEl);
-        return pres.documentElement!;
+        pres.appendChild(nickEl);
+        return pres;
     }
 
     static createNickMessage(to: string,message:string, nick: string) {
-        const msg = implementation.createDocument("jabber:client", "message", null);
-        msg.documentElement!.setAttribute("to", to);
-        msg.documentElement!.setAttribute("type", 'chat');
-        const body = msg.createElement('body');
-        body.textContent = message;
-        msg.documentElement!.appendChild(body);
-        const nickEl = msg.createElementNS(Nickname.NS, "nick");
+        const msg = Message.createMessage(to, message, "chat");
+        const nickEl = XMPPElement.createElementNS(Nickname.NS, "nick");
         nickEl.textContent = nick;
-        msg.documentElement!.appendChild(nickEl);
-        return msg.documentElement
+        msg.appendChild(nickEl);
+        return msg;
     }
 
     /**
@@ -37,11 +32,10 @@ export class Nickname {
      * @param nick 昵称
      */
     static createNickPublishIq(nick: string) {
-        const publishDoc = implementation.createDocument(null, "publish", null);
-        const publish = publishDoc.documentElement!;
+        const publish = Iq.createIq("set");
         publish.setAttribute("node", Nickname.NS);
-        const item = publishDoc.createElement("item");
-        const nickEl = publishDoc.createElementNS(Nickname.NS, "nick");
+        const item = XMPPElement.createElement("item");
+        const nickEl = XMPPElement.createElementNS(Nickname.NS, "nick");
         nickEl.textContent = nick;
         item.appendChild(nickEl);
         publish.appendChild(item);

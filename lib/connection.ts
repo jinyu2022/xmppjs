@@ -1,14 +1,13 @@
 import { EventEmitter } from "events";
 import { v4 as uuidv4 } from "uuid";
-import { domParser, implementation } from "./shims";
+import { XMPPElement } from "./ltx/Element.js";
 import { XMPPError, TimeoutError } from "./errors";
 import { JID } from "./JID";
 import logger from "./log";
 import { Message, Iq, Presence, StanzaBase } from "./stanza";
 import type WSConnection from "./transport/websocket";
 import type XMPPConnection from "./transport/tcp";
-import type { Protocol, Options } from "./types";
-import { Element as E } from "@xmldom/xmldom";
+import type { Protocol, Options } from "./types"; 
 const log = logger.getLogger("connection");
 
 interface StanzaHandlerMap {
@@ -32,7 +31,7 @@ interface EventPluginMap<K extends keyof EventHandlerMap> {
 
 // 定义所有可能的事件参数类型
 export interface SocketEventMap {
-  stanza: Element;
+  stanza: XMPPElement;
   message: Message;
   iq: Iq;
   presence: Presence;
@@ -82,20 +81,34 @@ export class Connection extends EventEmitter {
   url?: string;
   /** 是否启用tls，在本地调试的时候您可能不需要，默认为true */
   tls = true;
-  /** xml缓冲区 */
-  xmlBuffer = "";
+
+  /** 是否自动重连 */
+  private autoReconnect = false;
+  /** 重连间隔 */
+  private reconnectInterval = 1000;
+  /** 最大重连间隔，默认30000ms */
+  private reconnectMaxInterval = 30000;
+  /** 最大重连次数 */
+  private reconnectMaxAttempts = Infinity;
+  /** 当前重连次数 */
+  private reconnectAttempts = 0;
+  /** 是否为手动断开连接 */
+  private manualDisconnect = false;
+  /** 重连定时器 */
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+
   /**
    * 当前的连接实例
    * @warrning 你要知道你自己在做什么
    */
-  socket: XMPPConnection | WSConnection | null = null;
+  socket: XMPPConnection | null = null;
   /** 插件列表，键是插件名 */
   private readonly pendingPlugins = new Map<string, PluginConstructor>();
 
   /** stanza处理插件，键是NS，值是函数 */
   private readonly stanzaPlugins = new Map<
     string,
-    (stanza: Element) => Record<string, unknown>
+    (stanza: XMPPElement) => Record<string, unknown>
   >([]);
 
   private readonly eventPlugins: {
@@ -107,9 +120,10 @@ export class Connection extends EventEmitter {
     others: [],
   } as const;
 
+  // 拦截器，用于处理发送和接收的stanza
   private readonly interceptors: Map<
     "send" | "receive",
-    Array<(stanza: Element) => Element>
+    Array<(stanza: XMPPElement) => XMPPElement>
   > = new Map([
     ["send", []],
     ["receive", []],
@@ -150,6 +164,15 @@ export class Connection extends EventEmitter {
     if (options?.tls) {
       this.tls = options.tls;
     }
+    if (options?.reconnect) {
+      this.autoReconnect = options.reconnect;
+    }
+    if (options?.reconnectMaxInterval) {
+      this.reconnectMaxInterval = options.reconnectMaxInterval;
+    }
+    if (options?.reconnectMaxAttempts) {
+      this.reconnectMaxAttempts = options.reconnectMaxAttempts;
+    }
     // 组合url
     if (this.host && this.protocol) {
       const prefix = this.tls ? `${this.protocol}s` : this.protocol;
@@ -166,7 +189,7 @@ export class Connection extends EventEmitter {
    * 注册内置插件
    * @param name 内置插件名称
    */
-  registerPlugin<T extends keyof typeof plugins>(name: T): void;
+  registerPlugin(name: keyof typeof plugins): void;
   /**
    * 注册插件，如果是本库实现的插件，命名都是XEP0000格式，直接传入名称即可
    * 如果是自定义插件，需要传入插件构造函数
@@ -248,7 +271,7 @@ export class Connection extends EventEmitter {
    */
   registerStanzaPlugin(
     NS: string,
-    handler: (stanza: Element) => Record<string, unknown>
+    handler: (stanza: XMPPElement) => Record<string, unknown>
   ) {
     this.stanzaPlugins.set(NS, handler);
   }
@@ -279,7 +302,7 @@ export class Connection extends EventEmitter {
    */
   registerInterceptor(
     type: "send" | "receive",
-    handler: (stanza: Element) => Element
+    handler: (stanza: XMPPElement) => XMPPElement
   ) {
     this.interceptors.get(type)!.push(handler);
     log.info(`注册拦截器 ${type}`);
@@ -344,16 +367,21 @@ export class Connection extends EventEmitter {
       log.info("会话结束");
       this.emit("session:end");
     });
-    const msgHandler = (message: string) => this.onMessage(message);
-    this.socket.on("net:message", msgHandler);
+    const msgHandler = (stanza: XMPPElement) => this.onMessage(stanza);
+    this.socket.on("stanza", msgHandler);
     this.socket.once("disconnect", () => {
       log.info("连接已关闭");
-      this.socket?.off("net:message", msgHandler);
+      this.socket?.off("stanza", msgHandler);
       this.emit("disconnect");
       // this.socket = null;
     });
   }
 
+  /**
+   * 断开连接，清除所有监听器和插件
+   * 你应该在断开连接后重新创建一个连接实例来重新连接
+   * @experimental 这个方法会清除所有监听器和插件，使用时请注意
+   */
   disconnect() {
     // 清除所有监听器
     this.removeAllListeners();
@@ -368,36 +396,35 @@ export class Connection extends EventEmitter {
     this.stanzaPlugins.clear();
   }
 
-  private onMessage(message: string) {
-    log.debug("receive", message);
+  private close() {
 
-    // const xml = this.concatenateToXml(message);
-    const xml = message;
-    if (!xml) return;
-    let stanza: Element;
-    try {
-      stanza = domParser.parseFromString(xml, "text/xml").documentElement!;
-      if (stanza.getElementsByTagName("parsererror").length > 0) {
-        throw new Error("这不是一个该有的xml！");
-      }
-    } catch (e) {
-      if (
-        e instanceof Error &&
-        (e.message.includes("unclosed xml tag") ||
-          e.message.includes("missing root element") ||
-          e.message.includes("Unexpected content outside root element"))
-      ) {
-        this.concatenateToXml(xml);
-      } else {
-        log.error("解析失败", e, xml);
-      }
+  }
+
+  private reconnect() {
+    if (!this.autoReconnect) return;
+    if (this.reconnectAttempts >= this.reconnectMaxAttempts) {
+      log.warn("已达到最大重连次数，停止重连");
       return;
     }
+
+    const delay = Math.min(
+      this.reconnectInterval * 2 ** this.reconnectAttempts,
+      this.reconnectMaxInterval
+    );
+    this.reconnectAttempts++;
+    log.info(`准备在 ${delay}ms 后重连`);
+    setTimeout(() => {
+      this.connect();
+    }, delay);
+  }
+
+  private onMessage(stanza: XMPPElement) {
+    log.debug("receive", stanza.toXMLString());
+
     // 拦截器
     for (const handler of this.interceptors.get("receive")!) {
       stanza = handler(stanza);
     }
-    // this.emit("stanza", stanza);
 
     const tagName = ["message", "iq", "presence"].includes(stanza.tagName)
       ? (stanza.tagName as keyof StanzaHandlerMap)
@@ -407,96 +434,7 @@ export class Connection extends EventEmitter {
     this.emit(tagName, stanzaInstance);
   }
 
-  /**
-   * 拼接xml片段
-   * @param xml xml片段
-   * @returns 如果是一个完整的xml片段，返回完整xml，否则返回undefined
-   */
-  private concatenateToXml(xml: string) {
-    // 第一个xml片段肯定以<或?开头，否则就是一个错误的xml
-    if (
-      this.xmlBuffer.length === 0 &&
-      (!xml.startsWith("<") && !xml.startsWith("?"))
-    )
-      throw new Error(`未知的xml片段：${xml}`);
-
-    this.xmlBuffer += xml;
-
-    // 更简单的正则表达式，只匹配标签的开始和结束
-    const tagRegex = /<([^>]+)>/g; // 匹配 <...> 结构
-    const stack: string[] = [];
-    let match;
-
-    while ((match = tagRegex.exec(this.xmlBuffer)) !== null) {
-      const tagContent = match[1]; // 提取 < 和 > 之间的内容 (不包括 <>)
-      // const fullTag = match[0]; // 完整的标签字符串，包括 <>
-
-      // XML 声明/处理指令检查
-      if (tagContent.startsWith("?")) {
-        continue; // 忽略 XML 声明 <?xml ... ?>
-      }
-      // 注释检查
-      if (tagContent.startsWith("!--")) {
-        if (tagContent.endsWith("--")) {
-          continue; // 忽略完整注释 <!-- ... -->
-        } else {
-          // 不完整注释，等待后续数据
-          break;
-        }
-      }
-      // CDATA 检查
-      if (tagContent.startsWith("![CDATA[")) {
-        if (tagContent.endsWith("]]")) {
-          continue; // 忽略完整 CDATA <![CDATA[ ... ]]>
-        } else {
-          // 不完整 CDATA，等待后续数据
-          break;
-        }
-      }
-      // 自闭合标签检查
-      if (tagContent.endsWith("/")) {
-        continue; // 忽略自闭合标签 <tag/> 或 <tag .../>
-      }
-
-      // 结束标签检查
-      if (tagContent.startsWith("/")) {
-        const tagName = tagContent.substring(1).trim(); // 提取结束标签名
-        if (stack.length > 0 && stack[stack.length - 1] === tagName) {
-          stack.pop(); // 栈顶标签匹配，出栈
-        } else {
-          log.warn(
-            `XML标签不匹配: 结束标签 '${tagName}' 找不到匹配的开始标签`,
-            this.xmlBuffer
-          );
-          this.xmlBuffer = "";
-          return;
-        }
-      }
-      // 开始标签检查
-      else {
-        const tagName = tagContent.trim().split(" ")[0]; // 提取开始标签名 (忽略属性)
-        stack.push(tagName); // 开始标签入栈
-      }
-    }
-
-    if (stack.length === 0 && this.xmlBuffer.trim().length > 0) {
-      const result = this.xmlBuffer.trim();
-      this.xmlBuffer = "";
-      // 返回完整的 XML 片段
-      this.onMessage(result);
-      return result;
-    }
-
-    // 防止缓冲区过大
-    if (this.xmlBuffer.length > 1024_000) {
-      log.warn("xml片段过大，可能是一个错误的xml，清空缓冲区");
-      this.xmlBuffer = "";
-    }
-
-    return;
-  }
-
-  private stanzaInstanceFactory(stanza: Element) {
+  private stanzaInstanceFactory(stanza: XMPPElement) {
     const tagName = ["message", "iq", "presence"].includes(stanza.tagName)
       ? (stanza.tagName as keyof StanzaHandlerMap)
       : "others";
@@ -511,8 +449,6 @@ export class Connection extends EventEmitter {
           this.emit(eventPlugin.eventName, stanzaInstance);
         }
       }
-      // 407行已经发出过了
-      // this.emit("message", stanzaInstance);
     } else if (tagName === "iq") {
       stanzaInstance = new Iq(stanza, this);
       this.traverseAndTransform(stanzaInstance);
@@ -560,13 +496,9 @@ export class Connection extends EventEmitter {
     }
     visited.add(obj);
 
-    if (typeof Element === "undefined") {
-      globalThis.Element = E;
-    }
-
     for (const [key, value] of Object.entries(obj)) {
       if (
-        value instanceof Element &&
+        value instanceof XMPPElement &&
         this.stanzaPlugins.has(value.namespaceURI ?? "")
       ) {
         const handler = this.stanzaPlugins.get(value.namespaceURI!)!;
@@ -586,9 +518,9 @@ export class Connection extends EventEmitter {
    * 发送一个stanza
    * @param stanza 如果是字符串，直接发送，你要知道自己在干什么
    */
-  send(stanza: Element | string) {
+  send(stanza: XMPPElement | string) {
     if (typeof stanza === "string") {
-      stanza = domParser.parseFromString(stanza, "text/xml").documentElement!;
+      stanza = Parser.parse(stanza);
       for (const handler of this.interceptors.get("send")!) {
         stanza = handler(stanza);
       }
@@ -606,10 +538,6 @@ export class Connection extends EventEmitter {
     if (stanza.tagName === "iq" && !stanza.getAttribute("type")) {
       throw new XMPPError(stanza, "iq stanza缺少type属性");
     }
-    // 如果没有, 服务器会自动填充
-    // if (!stanza.getAttribute("from")) {
-    //   stanza.setAttribute("from", this.jid.full);
-    // }
     if (!stanza.getAttribute("id")) {
       stanza.setAttribute("id", uuidv4());
     }
@@ -634,7 +562,7 @@ export class Connection extends EventEmitter {
    * @returns 一个Promise对象，仅在发送失败时reject
    * @throws 超时时抛出 TimeoutError
    */
-  sendAsync(stanza: Element, timeout = 30000) {
+  sendAsync(stanza: XMPPElement, timeout = 30000) {
     // 检查必须的流属性
     // XXX: 我不清楚需要进行那些检查,多余, 或者缺失
 
@@ -667,7 +595,7 @@ export class Connection extends EventEmitter {
         ? stanza.tagName
         : "others"
     ) as "message" | "iq" | "presence" | "others";
-    return new Promise<Element>((resolve, reject) => {
+    return new Promise<XMPPElement>((resolve, reject) => {
       const handler = (response: StanzaBase) => {
         if (response.id === id) {
           this.off(tagName, handler);
@@ -685,63 +613,12 @@ export class Connection extends EventEmitter {
     // return this.socket.sendAsync(stanza, timeout);
   }
 
-  /**
-   * 创建一个presence节
-   * @param to 接收者
-   * @param type 类型
-   *   - subscribe 订阅
-   *   - unsubscribe 取消订阅
-   *   - unavailable 下线
-   *   - subscribed 订阅成功
-   *   - unsubscribed 取消订阅成功
-   */
-  createPres(
-    to: string | JID,
-    type?:
-      | "subscribe"
-      | "unsubscribe"
-      | "unavailable"
-      | "subscribed"
-      | "unsubscribed"
-  ) {
-    const pre = implementation.createDocument(
-      "jabber:client",
-      "presence",
-      null
-    );
-    pre.documentElement!.setAttribute("to", to.toString());
-    if (type) pre.documentElement!.setAttribute("type", type);
-    return pre;
-  }
-
-  createIq(
-    type: "get" | "set" | "result" | "error",
-    to?: JID | string,
-    queryNS?: string
-  ) {
-    const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement!;
-    iq.setAttribute("type", type);
-    if (to) iq.setAttribute("to", to.toString());
-    if (queryNS) {
-      const query = doc.createElementNS(queryNS, "query");
-      iq.appendChild(query);
-    }
-    return iq;
-  }
   sendIq(
     type: "get" | "set" | "result" | "error",
     to: JID | string,
     queryNS?: string
   ) {
-    const doc = implementation.createDocument("jabber:client", "iq", null);
-    const iq = doc.documentElement!;
-    iq.setAttribute("type", type);
-    iq.setAttribute("to", to.toString());
-    if (queryNS) {
-      const query = doc.createElementNS(queryNS, "query");
-      iq.appendChild(query);
-    }
+    const iq = Iq.createIq(type, to, queryNS);
 
     return this.sendAsync(iq);
   }
@@ -754,7 +631,7 @@ export class Connection extends EventEmitter {
    */
   private stanzaListener(
     id: string,
-    callback: (stanza: Element) => void,
+    callback: (stanza: XMPPElement) => void,
     timeout?: number
   ): void;
 
@@ -764,18 +641,18 @@ export class Connection extends EventEmitter {
    * @param callback 回调函数
    */
   private stanzaListener(
-    filter: (stanza: Element) => boolean,
-    callback: (stanza: Element) => void,
+    filter: (stanza: XMPPElement) => boolean,
+    callback: (stanza: XMPPElement) => void,
     timeout?: number
   ): void;
 
   private stanzaListener(
-    filter: string | ((stanza: Element) => boolean),
-    callback: (stanza: Element) => void,
+    filter: string | ((stanza: XMPPElement) => boolean),
+    callback: (stanza: XMPPElement) => void,
     timeout = 30000
   ) {
     // 定义处理函数
-    const handler = (stanza: Element) => {
+    const handler = (stanza: XMPPElement) => {
       const isMatch =
         typeof filter === "string"
           ? stanza.getAttribute("id") === filter
@@ -794,19 +671,11 @@ export class Connection extends EventEmitter {
     // 注册监听器
     this.on("stanza", handler);
   }
-
-  /**
-   * 消息节监听移除器
-   * @param callback 回调函数
-   *
-   */
-  removeStanzaListener(callback: (stanza: Element) => void) {
-    this.off("stanza", callback);
-  }
 }
 
 import { plugins } from "../lib/plugins/index";
 import type { PluginConstructor } from "./plugins/types";
+import { Parser } from "./ltx/Parser.js";
 
 type PluginRegistry = {
   [K in keyof typeof plugins]?: InstanceType<(typeof plugins)[K]>;

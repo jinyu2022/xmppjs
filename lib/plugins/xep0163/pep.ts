@@ -1,5 +1,6 @@
 import { JID } from "@/JID";
 import { Pubsub } from "../xep0060/pubsub";
+import { XMPPElement } from "@/ltx/Element";
 export class PEP {
     
     /**
@@ -19,7 +20,7 @@ export class PEP {
      * @param publishOptions
      * @returns 
      */
-    static createPublishIq(publish: Element, publishOptions?: Element){
+    static createPublishIq(publish: XMPPElement, publishOptions?: XMPPElement){
         return Pubsub.createPublishIq(publish, publishOptions);
     }
 

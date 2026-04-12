@@ -2,6 +2,12 @@ import type Connection from "@/connection";
 import type { Plugin } from "../types";
 import {PEP} from "./pep";
 import { Pubsub } from "@/plugins/xep0060/pubsub";
+
+/**
+ * XEP-0163: Personal Eventing Protocol 个人事件协议
+ * @see https://xmpp.org/extensions/xep-0163.html
+ * @version 1.2.2 (2022-02-16)
+ */
 export class XEP0163 extends PEP implements Plugin {
     static readonly dependencies = ["XEP0030"] as const;
     readonly connection: Connection;

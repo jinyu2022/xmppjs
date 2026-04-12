@@ -2,7 +2,7 @@ import { Form, type DataForm } from "../xep0004/form";
 import { domParser, xmlSerializer } from "@/shims";
 import { XMPPError, TimeoutError } from "@/errors";
 import { Register, type WSconnection } from "./register";
-import type { TLSSocket } from "tls";
+import type { TLSSocket } from "node:tls";
 import { EventEmitter } from "events";
 /**
  * XEP-0077: In-Band Registration

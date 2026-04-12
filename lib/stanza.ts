@@ -1,6 +1,5 @@
 import type { Connection } from "./connection";
-import type { XMPPElement } from "./ltx/Element";
-import { xmlSerializer, implementation } from "./shims";
+import { XMPPElement } from "./ltx/Element";
 import { JID } from "./JID";
 import logger from "./log";
 
@@ -46,7 +45,7 @@ export class StanzaBase {
     });
   }
 
-  static parseBaseStanza(stanza: Element) {
+  static parseBaseStanza(stanza: XMPPElement) {
     if (stanza.tagName === "iq") {
       return Iq.parseIq(stanza);
     } else if (stanza.tagName === "message") {
@@ -58,7 +57,7 @@ export class StanzaBase {
     }
   }
 
-  send(xml: Element) {
+  send(xml: XMPPElement) {
     this.connection.send(xml);
   }
 
@@ -75,19 +74,19 @@ export class StanzaBase {
       configurable: true, // 属性可删除或重新定义
     });
   }
-  
+
   /**
    * @returns xml字符串
    */
   toString() {
-    return xmlSerializer.serializeToString(this.xml);
+    return this.xml.toXMLString();
   }
 }
 
 export class Iq extends StanzaBase {
   readonly type: "get" | "set" | "result" | "error";
   readonly tagName = "iq";
-  constructor(stanza: Element, connection: Connection) {
+  constructor(stanza: XMPPElement, connection: Connection) {
     super(stanza, connection);
     const { id, to, from, type, ...children } = Iq.parseIq(stanza).iq;
     // iq节点必须有type属性
@@ -99,20 +98,17 @@ export class Iq extends StanzaBase {
     }
   }
 
-  static parseIq(iq: Element) {
+  static parseIq(iq: XMPPElement) {
     const id = iq.getAttribute("id");
     let to: JID | string | null = iq.getAttribute("to");
     let from: JID | string | null = iq.getAttribute("from");
     if (to?.includes("@")) to = new JID(to);
     if (from?.includes("@")) from = new JID(from);
-    const type = iq.getAttribute("type") as 'get' | 'set' | 'result' | 'error';
-    const childrens = Array.from(iq.childNodes).filter(
-      (child) => child.nodeType === 1
-    );
-    const children = childrens.reduce((acc, child) => {
-      acc[(child as Element).tagName] = child as Element;
+    const type = iq.getAttribute("type") as 'get' | 'set' | 'result' | 'error';;
+    const children = Array.from(iq.children).reduce((acc, child) => {
+      acc[child.tagName] = child;
       return acc;
-    }, {} as Record<string, Element>);
+    }, {} as Record<string, XMPPElement>);
     return {
       iq: {
         id,
@@ -129,12 +125,12 @@ export class Iq extends StanzaBase {
     to?: JID | string,
     queryNS?: string
   ) {
-    const iq = implementation.createDocument("jabber:client", "iq", null);
-    iq.documentElement!.setAttribute("type", type);
-    if (to) iq.documentElement!.setAttribute("to", to.toString());
+    const iq = XMPPElement.createElementNS("jabber:client", "iq");
+    iq.setAttribute("type", type);
+    if (to) iq.setAttribute("to", to.toString());
     if (queryNS) {
-      const query = iq.createElementNS(queryNS, "query");
-      iq.documentElement!.appendChild(query);
+      const query = XMPPElement.createElementNS(queryNS, "query");
+      iq.appendChild(query);
     }
     return iq;
   }
@@ -145,7 +141,7 @@ export class Message extends StanzaBase {
   readonly tagName = "message";
   readonly subject?: string | null;
   readonly body?: string | null;
-  constructor(stanza: Element, connection: Connection) {
+  constructor(stanza: XMPPElement, connection: Connection) {
     super(stanza, connection);
     const { to, from, type, subject, body, ...children } =
       Message.parseMessage(stanza).message;
@@ -158,7 +154,7 @@ export class Message extends StanzaBase {
     }
   }
 
-  static parseMessage(message: Element): Record<
+  static parseMessage(message: XMPPElement): Record<
     "message",
     {
       to: JID | string | null;
@@ -176,49 +172,55 @@ export class Message extends StanzaBase {
     if (from?.includes("@")) from = new JID(from);
     const type = (message.getAttribute("type") ?? "normal") as MsgType;
     // 查找直接子节点subject
-    const subjectEl = Array.from(message.childNodes).filter(
-      (child) =>
-        child.nodeType === 1 && (child as Element).tagName === "subject"
-    )[0];
-    // 查找直接子节点body
-    const bodyEl = Array.from(message.childNodes).filter(
-      (child) => child.nodeType === 1 && (child as Element).tagName === "body"
-    )[0];
+    // 某些XEP的子元素也会有subject标签，但是主题subject应该是message的直接子节点
+    const subjectEl = Array.from(message.children).find(
+      (child) => child.tagName === "subject"
+    );
+    // 查找直接子节点body，理由同上
+    const bodyEl = Array.from(message.children).find(
+      (child) => child.tagName === "body"
+    );
     // 获取其余子节点
-    const childrens = Array.from(message.childNodes).filter(
+    const childrens = Array.from(message.children).filter(
       (child) =>
-        child.nodeType === 1 &&
-        !["subject", "body"].includes((child as Element).tagName)
+        child.tagName !== "subject" && child.tagName !== "body"
     );
 
     // 转为object，键为tagName，值为Element
+    // 应该不会有重复的tagName吧？
     const children = childrens.reduce((acc, child) => {
-      acc[(child as Element).tagName] = child as Element;
+      acc[child.tagName] = child;
       return acc;
-    }, {} as Record<string, Element>);
+    }, {} as Record<string, XMPPElement>);
     return {
       message: {
         to,
         from,
         type,
-        subject: subjectEl?.textContent,
-        body: bodyEl?.textContent,
+        subject: subjectEl?.textContent ?? null, // 如果没有subject节点则为null
+        body: bodyEl?.textContent ?? null,       // sub和body类型早已定义为string | null
         ...children,
       },
     };
   }
 
-  static createMessage(to: JID | string, body: string, type = "normal") {
-    const message = implementation.createDocument(
-      "jabber:client",
-      "message",
-      null
-    );
-    message.documentElement!.setAttribute("to", to.toString());
-    message.documentElement!.setAttribute("type", type);
-    const bodyEl = message.createElement("body");
-    bodyEl.textContent = body;
-    message.documentElement!.appendChild(bodyEl);
+  /**
+   * 创建一个消息stanza
+   * @param to 接收者JID或字符串
+   * @param body 消息体
+   * @param type 消息类型，默认为normal
+   * @returns XMPPElement 消息stanza
+   */
+  static createMessage(to: JID | string, body?: string, type: MsgType = "normal") {
+    const message = XMPPElement.createElementNS(StanzaBase.NS, "message");
+    message.setAttribute("to", to.toString());
+    message.setAttribute("type", type);
+    /** 消息体元素 */
+    if (body) {
+      const bodyEl = XMPPElement.createElement("body");
+      bodyEl.textContent = body;
+      message.appendChild(bodyEl);
+    }
     return message;
   }
 }
@@ -228,7 +230,7 @@ export class Presence extends StanzaBase {
   readonly tagName = "presence";
   readonly show?: presShow;
   readonly status?: string | null;
-  constructor(stanza: Element, connection: Connection) {
+  constructor(stanza: XMPPElement, connection: Connection) {
     super(stanza, connection);
     const { to, from, type, show, status, ...children } =
       Presence.parsePresence(stanza).presence;
@@ -241,25 +243,24 @@ export class Presence extends StanzaBase {
     }
   }
 
-  static parsePresence(presence: Element) {
+  static parsePresence(presence: XMPPElement) {
     // const presence
     let to: JID | string | null = presence.getAttribute("to");
-    let from : JID | string | null= presence.getAttribute("from");
+    let from: JID | string | null = presence.getAttribute("from");
     if (to?.includes("@")) to = new JID(to);
     if (from?.includes("@")) from = new JID(from);
     const type = presence.getAttribute("type");
     const show = presence.getElementsByTagName("show")[0]
       ?.textContent as presShow;
     const status = presence.getElementsByTagName("status")[0]?.textContent;
-    const childrens = Array.from(presence.childNodes).filter(
+    const childrens = Array.from(presence.children).filter(
       (child) =>
-        child.nodeType === 1 &&
-        child.localName !== "show" &&
-        child.localName !== "status"
+        child.tagName !== "show" &&
+        child.tagName !== "status"
     );
-    const children: Record<string, Element> = {};
+    const children: Record<string, XMPPElement> = {};
     for (const child of childrens) {
-        children[(child as Element).tagName] = child as Element;
+      children[child.tagName] = child;
     }
     return {
       presence: {
@@ -271,5 +272,25 @@ export class Presence extends StanzaBase {
         ...children,
       },
     };
+  }
+
+  /**
+   * 创建一个presence节
+   * @param to 接收者
+   * @param type 类型
+   *   - subscribe 订阅
+   *   - unsubscribe 取消订阅
+   *   - unavailable 下线
+   *   - subscribed 订阅成功
+   *   - unsubscribed 取消订阅成功
+   */
+  static createPresence(
+    to: JID | string,
+    type?: "subscribe" | "unsubscribe" | "unavailable" | "subscribed" | "unsubscribed",
+  ) {
+    const presence = XMPPElement.createElementNS(StanzaBase.NS, "presence");
+    presence.setAttribute("to", to.toString());
+    if (type) presence.setAttribute("type", type);
+    return presence;
   }
 }

@@ -1,5 +1,5 @@
-import dns from 'dns/promises'; // 使用 promise 版本的 dns 模块
-import type { SrvRecord } from 'dns'; // 导入 SrvRecord 类型
+import dns from 'node:dns/promises'; // 使用 promise 版本的 dns 模块
+import type { SrvRecord } from 'node:dns'; // 导入 SrvRecord 类型
 import logger from '@/log'; // 导入日志模块
 
 const log = logger.getLogger('dns');
