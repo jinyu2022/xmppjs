@@ -1,11 +1,11 @@
 import type { Connection } from "@/connection";
 import { Plugin } from "../types";
 import { MUC, JoinOptions, MUCStatusCode } from "./muc";
-import { XMPPError, TimeoutError } from "@/errors.ts";
+import { XMPPError, TimeoutError } from "@/errors";
 import { XEP0004 } from "../xep0004";
 import { JID } from "@/JID";
 import type { DataForm } from "../xep0004/form";
-import type { MUCUserPres, MUCUser } from "./typing";
+import type { MUCUserPres, MUCUser, MUCItem } from "./typing";
 import logger from "@/log";
 const log = logger.getLogger("XEP0045");
 /**
@@ -42,7 +42,7 @@ export class XEP0045 extends MUC implements Plugin {
         this.connection.registerEventPlugin("muc:join", {
             tagName: "presence",
             matcher: (pers: Presence) => {
-                return Boolean(pers.muc?.item && !pers.muc.statuses?.length);
+                return Boolean(pers.muc?.statuses?.includes(MUCStatusCode.SelfPresence) && !pers.type);
             },
         });
         this.connection.registerEventPlugin("muc:leave", {
@@ -60,7 +60,7 @@ export class XEP0045 extends MUC implements Plugin {
         this.connection.registerEventPlugin("muc:subject", {
             tagName: "message",
             matcher: (msg) => {
-                return Boolean(msg.type === "groupchat" && msg.subject && !msg.body);
+                return Boolean(msg.type === "groupchat" && msg.subject != null && msg.body == null);
             },
         });
         this.connection.registerEventPlugin("muc:kick", {
@@ -78,12 +78,15 @@ export class XEP0045 extends MUC implements Plugin {
         this.connection.registerEventPlugin("muc:destroy", {
             tagName: "presence",
             matcher: (pers) => {
-                return Boolean((pers.muc as MUCUserPres<"destroy">)?.destroy);
+                const muc = pers.muc;
+                return Boolean(muc && "destroy" in muc);
             },
         });
 
         this.connection.on("presence", (pres) => {
             if (!pres.muc?.item) return;
+            // XMPP error presences 不代表房间状态变化，跳过
+            if (pres.type === "error") return;
 
             const room = (pres.from as JID).bare;
             const userJid = (pres.from as JID).full;
@@ -93,13 +96,29 @@ export class XEP0045 extends MUC implements Plugin {
             };
             if (pres.type === "unavailable") {
                 if (pres.muc.statuses?.includes(MUCStatusCode.SelfPresence)) {
-                    // 如果是自己离开，删除房间
-                    this.rooms.delete(room);
+                    // 昵称变更（含 303）：保留房间，仅移除旧昵称
+                    if (pres.muc.statuses.includes(MUCStatusCode.NewNick)) {
+                        this.rooms.get(room)?.occupants.delete(userJid);
+                    } else {
+                        // 真正离开，删除房间
+                        this.rooms.delete(room);
+                    }
                 } else {
-                    this.rooms.get(room)!.occupants.delete(userJid);
+                    this.rooms.get(room)?.occupants.delete(userJid);
                 }
             } else {
-                this.rooms.get(room)!.occupants.set(userJid, user);
+                // 确保房间存在（昵称变更后旧 nick 的 unavailable 已保留房间）
+                if (!this.rooms.has(room)) {
+                    this.rooms.set(room, {
+                        nick: (pres.from as JID).resource!,
+                        occupants: new Map(),
+                    });
+                }
+                // 收到自身 available presence 时更新存储的昵称
+                if (pres.muc.statuses?.includes(MUCStatusCode.SelfPresence)) {
+                    this.rooms.get(room)!.nick = (pres.from as JID).resource!;
+                }
+                this.rooms.get(room)?.occupants.set(userJid, user);
             }
         });
     }
@@ -114,46 +133,129 @@ export class XEP0045 extends MUC implements Plugin {
      *   - seconds 最大秒数
      *   - since 从某个时间开始
      *   - password 房间密码
-     * @param timeout 超时时间，默认为5分钟
+     * @param timeout 两个pre节之间的超时时间，默认为5分钟
      * @returns 加入房间的响应节
      */
-    async join(
+    join(
         room: string | JID,
         nick: string,
         options?: JoinOptions,
         timeout = 3_000_000
     ) {
+        room = typeof room === "string" ? new JID(room) : room;
         const pres = XEP0045.createJoinPres(room, nick, options);
-        // 服务器在其他用户的存在广播发送完成后才会返回响应
-        // 所以我需要先把rooms设置好，然后再等待响应
-        this.rooms.set(room.toString(), {
-            nick,
-            occupants: new Map(),
+        /**
+         * @see https://xmpp.org/extensions/xep-0045.html#enter-pres
+         * 加入成功后，服务端会返回其他居住者的presence，自己的presence会在其他居住者的presence发送完成后才返回
+         * 自己的响应presence的id和加入请求的presence的id可能是一样的（不保证）
+         * 自己的响应presence的status code中会包含110，表示self-presence
+         * 加入房间的presence的type为null，错误时为error
+         * 收到自己的presence代表加入房间成功，收到其他居住者的presence代表其他居住者已知晓自己加入了房间
+         */
+
+        // 不使用 sendAsync，因为 presence 的 id 回显不保证
+        // 根据 XEP-0045 §7.2.2，成功标志是收到 status code 110 的 self-presence
+        return new Promise((resolve, reject) => {
+            let timer: ReturnType<typeof setTimeout>;
+
+            const resetTimer = () => {
+                clearTimeout(timer);
+                timer = setTimeout(() => {
+                    cleanup();
+                    this.rooms.delete(room.bare);
+                    reject(new TimeoutError("加入房间超时：收到首个 presence 后未能在超时时间内收到 self-presence"));
+                }, timeout);
+            };
+
+            const handler = (presence: Presence) => {
+                if (typeof presence.from === "string" || !presence.from) return;
+                if (presence.from.bare !== room.bare) return;
+
+                // 错误响应
+                if (presence.type === "error") {
+                    cleanup();
+                    this.rooms.delete(room.bare);
+                    reject(new XMPPError(presence.xml, "加入房间失败"));
+                    return;
+                }
+                // 避免出现其他用户加入先触发，房间不存在的情况
+                // init() 中注册的全局 presence 处理器会通过 rooms.get(room) 添加用户
+                if (!this.rooms.has(presence.from.bare)) {
+                    this.rooms.set(presence.from.bare, {
+                        nick,
+                        occupants: new Map(),
+                    });
+                }
+
+                log.debug(`收到房间用户 ${presence.from.full} 的presence`);
+
+                // 后续每个 presence 都重置超时
+                resetTimer();
+
+                // self-presence → 加入成功
+                if (presence.muc?.statuses?.includes(MUCStatusCode.SelfPresence)) {
+                    cleanup();
+                    log.debug("加入房间成功");
+                    resolve(presence.xml);
+                }
+            };
+            const cleanup = () => {
+                this.connection.off("presence", handler);
+                clearTimeout(timer);
+            };
+            // 使用 prependListener 确保在 init() 中注册的全局 presence 处理器之前触发
+            this.connection.prependListener("presence", handler);
+            this.connection.send(pres);
+            resetTimer();
         });
-        const res = await this.connection.sendAsync(pres, timeout);
-        // 如果加入失败，服务端会返回一个错误的presence
-        if (res.getAttribute("type") === "error") {
-            // 删除rooms
-            this.rooms.delete(room.toString());
-            throw new XMPPError(res, "加入房间失败");
-        } else if (res.getAttribute("type") === null) {
-            // 如果没有返回类型，说明加入成功
-            log.debug("加入房间成功");
-        } else {
-            log.error("未知类型", res);
-        }
-        return res;
     }
 
     async leave(to: string | JID, reason?: string) {
-        if (!this.rooms.has(to.toString())) throw new Error(`未加入房间${to}`);
-        const pres = XEP0045.createLeavePres(to, reason);
-        const res = await this.connection.sendAsync(pres);
-        if (res.getAttribute("type") === "unavailable") {
-            log.debug("离开房间成功");
-        } else if (res.getAttribute("type") === "error") {
-            throw new XMPPError(res, "离开房间失败");
-        }
+        // 规范化为 bare JID 用于房间查找
+        const roomJid = typeof to === "string" ? new JID(to) : to;
+        const bare = roomJid.bare;
+        const room = this.rooms.get(bare);
+        if (!room) throw new Error(`未加入房间${bare}`);
+
+        // 构造完整的 occupant JID: room/nick
+        const fullJid = `${bare}/${room.nick}`;
+        const pres = XEP0045.createLeavePres(fullJid, reason);
+
+        // 不使用 sendAsync，因为 presence 的 id 回显不保证
+        // 成功标志是收到 status code 110 的 self-presence，type=unavailable
+        return new Promise<void>((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                cleanup();
+                reject(new TimeoutError("离开房间超时"));
+            }, 10_000);
+
+            const handler = (presence: Presence) => {
+                if (typeof presence.from === "string" || !presence.from) return;
+                if (presence.from.bare !== bare) return;
+
+                if (presence.type === "error") {
+                    cleanup();
+                    reject(new XMPPError(presence.xml, "离开房间失败"));
+                    return;
+                }
+
+                // self-presence → 离开成功
+                if (presence.type === "unavailable" &&
+                    presence.muc?.statuses?.includes(MUCStatusCode.SelfPresence)) {
+                    cleanup();
+                    log.debug("离开房间成功");
+                    resolve();
+                }
+            };
+
+            const cleanup = () => {
+                this.connection.off("presence", handler);
+                clearTimeout(timeoutId);
+            };
+
+            this.connection.on("presence", handler);
+            this.connection.send(pres);
+        });
     }
 
     setNick(room: string | JID, nick: string) {
@@ -163,41 +265,34 @@ export class XEP0045 extends MUC implements Plugin {
         const pres = XEP0045.createSetNickPres(room, nick);
         const id = pres.getAttribute("id")!;
         const selfRoomJid = `${room.bare}/${this.rooms.get(room.bare)!.nick}`;
-        return new Promise((resolve, reject) => {
+        return new Promise<Presence>((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                cleanup();
+                reject(new TimeoutError("设置昵称超时"));
+            }, 10_000);;
+            const cleanup = () => {
+                this.connection.off("presence", handler);
+                clearTimeout(timeoutId);
+            };
+
             const handler = (presence: Presence) => {
-                // TODO: 应该更加优雅的处理
-                const stanza = presence.xml;
-                // 处理错误响应
-                if (stanza.getAttribute("id") === id) {
-                    clearTimeout(timeoutId);
-                    this.connection.off("presence", handler);
-                    if (stanza.getAttribute("type") === "error") {
-                        return reject(new XMPPError(stanza, "设置昵称失败"));
-                    }
-                    return reject(new XMPPError(stanza, "未知类型"));
+                // 错误响应：服务端回显相同 id 且 type=error
+                if (presence.id === id && presence.type === "error") {
+                    cleanup();
+                    reject(new XMPPError(presence.xml, "设置昵称失败"));
+                    return;
                 }
 
-                // 处理成功响应
-                if (stanza.getAttribute("from") === selfRoomJid) {
-                    const x = stanza.getElementsByTagNameNS(XEP0045.NS.USER, "x")[0];
-                    if (!x) return;
-
-                    const hasSuccess = Array.from(x.getElementsByTagName("status")).some(
-                        (s) => s.textContent === MUCStatusCode.SelfPresence
-                    );
-                    if (hasSuccess) {
-                        clearTimeout(timeoutId);
-                        this.connection.off("presence", handler);
-                        log.debug("设置昵称成功");
-                        resolve(stanza);
-                    }
+                // 成功响应：来自自身旧 room JID，且包含 110 self-presence
+                // 房间状态（nick、occupants）由全局 presence handler 管理，这里只确认成功
+                if ((presence.from as JID)?.full === selfRoomJid &&
+                    presence.muc?.statuses?.includes(MUCStatusCode.SelfPresence)) {
+                    cleanup();
+                    log.debug("设置昵称成功");
+                    resolve(presence);
                 }
             };
-            const timeoutId = setTimeout(() => {
-                this.connection.off("presence", handler);
-                reject(new TimeoutError("设置昵称超时"));
-            }, 10_000);
-
+            this.connection.on("presence", handler);
             this.connection.send(pres);
         });
     }
@@ -239,25 +334,31 @@ export class XEP0045 extends MUC implements Plugin {
     async kick(room: string | JID, nick: string, reason?: string) {
         if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
         const iq = XEP0045.createSetRoleIq(room, nick, "none", reason);
-        this.connection.sendAsync(iq).then((res) => {
-            if (res.getAttribute("type") === "error") {
-                throw new XMPPError(res, "踢人失败");
-            } else if (res.getAttribute("type") === "result") {
-                log.debug("踢人成功");
-            }
-        });
+        const res = await this.connection.sendAsync(iq);
+        if (res.getAttribute("type") === "error") {
+            throw new XMPPError(res, "踢人失败");
+        } else if (res.getAttribute("type") === "result") {
+            log.debug("踢人成功");
+        }
+
     }
 
-    async ban(room: string | JID, nick: string, reason?: string) {
+    /**
+     * 封禁用户，将归属改为 outcast
+     * @param room 房间id
+     * @param jid 住户的裸jid
+     * @param reason 原因
+     */
+    async ban(room: string | JID, jid: string | JID, reason?: string) {
         if (!this.rooms.has(room.toString())) throw new Error(`未加入房间${room}`);
-        const iq = XEP0045.createSetAffiliationIq(room, nick, "outcast", reason);
-        this.connection.sendAsync(iq).then((res) => {
-            if (res.getAttribute("type") === "error") {
-                throw new XMPPError(res, "禁言失败");
-            } else if (res.getAttribute("type") === "result") {
-                log.debug("禁言成功");
-            }
-        });
+        const iq = XEP0045.createSetAffiliationIq(room, jid, "outcast", reason);
+        const res = await this.connection.sendAsync(iq);
+        if (res.getAttribute("type") === "error") {
+            throw new XMPPError(res, "禁言失败");
+        } else if (res.getAttribute("type") === "result") {
+            log.debug("禁言成功");
+        }
+
     }
 
     async getRoomConfig(room: string | JID) {
@@ -301,15 +402,15 @@ export class XEP0045 extends MUC implements Plugin {
                     field.values = [roomName];
                     break;
                 // 仅限成员
-                case "MUC#roomconfig_membersonly":
+                case "muc#roomconfig_membersonly":
                     field.values = ["1"];
                     break;
                 // 开启审核
-                case "MUC#roomconfig_moderatedroom":
+                case "muc#roomconfig_moderatedroom":
                     field.values = ["1"];
                     break;
                 // 不允许公开搜索
-                case "MUC#roomconfig_publicroom":
+                case "muc#roomconfig_publicroom":
                     field.values = ["0"];
                     break;
                 // 公开用户的JID
@@ -349,7 +450,7 @@ export class XEP0045 extends MUC implements Plugin {
                     field.values = [roomName];
                     break;
                 // 开启公开搜索
-                case "MUC#roomconfig_publicroom":
+                case "muc#roomconfig_publicroom":
                     field.values = ["1"];
                     break;
                 // 公开用户的JID
@@ -373,26 +474,31 @@ import type { Message, Presence } from "@/stanza";
 
 declare module "@/stanza" {
     interface Presence {
-        muc?: MUCUserPres<"destroy" | "invite" | "decline">;
+        muc?: MUCUserPres;
     }
 }
 
 declare module "@/connection" {
     interface SocketEventMap {
-        "muc:join"?: Presence;
-        "muc:leave"?: Presence;
-        /** 接受到来自群聊的消息时触发 */
-        "muc:groupchat"?: Message;
-        /** 收到群聊主题时触发 */
-        "muc:subject"?: Message;
-        "muc:mediated-invite"?: Presence;
+        /** 自己的 available presence（type=null, statuses 含 110） */
+        "muc:join"?: Presence & { type: null; muc: { item?: MUCItem; statuses: string[] } };
+        /** 他人的 unavailable presence（type="unavailable", item 必存在） */
+        "muc:leave"?: Presence & { type: "unavailable"; muc: { item: MUCItem; statuses?: string[] } };
+        /** 接受到来自群聊的消息时触发（type="groupchat", body 为消息内容） */
+        "muc:groupchat"?: Message & { type: "groupchat"; body: string };
+        /** 收到群聊主题时触发（type="groupchat", subject 必存在, body 为 null） */
+        "muc:subject"?: Message & { type: "groupchat"; subject: string; body: null };
+        /** 收到 mediated invite */
+        "muc:mediated-invite"?: Presence & { muc: MUCUserPres<"invite"> };
         // "muc:direct-invite"?: Presence;
         /** 邀请被拒绝 */
-        "muc:decline"?: Presence;
-        /** 房间被销毁 */
-        "muc:destroy"?: Presence;
-        "muc:kick"?: Presence;
-        "muc:ban"?: Presence;
+        "muc:decline"?: Presence & { muc: MUCUserPres<"decline"> };
+        /** 房间被销毁（muc 中 destroy 必存在） */
+        "muc:destroy"?: Presence & { muc: MUCUserPres<"destroy"> };
+        /** 自己被踢出房间（statuses 含 307） */
+        "muc:kick"?: Presence & { muc: { item?: MUCItem; statuses: string[] } };
+        /** 自己被封禁（statuses 含 301） */
+        "muc:ban"?: Presence & { muc: { item?: MUCItem; statuses: string[] } };
         "muc:voice-request"?: Presence;
     }
 }

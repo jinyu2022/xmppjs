@@ -1,5 +1,3 @@
-// e:\git\ltx\src\index.ts
-
 import { XMPPElement } from "./Element.js";
 import { Parser } from "./Parser.js";
 import { escapeXML, unescapeXML, escapeXMLText, unescapeXMLText } from "./escape.js";

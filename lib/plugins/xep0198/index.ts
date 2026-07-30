@@ -227,6 +227,7 @@ export default class XEP0198 extends StreamManagement implements Plugin {
                     if (response.tagName !== "resumed") {
                         log.error("恢复失败");
                         reject(new XMPPError(xml, "恢复失败"));
+                        return;
                     }
                     if (Number.parseInt(xml.getAttribute("h")!) !== this.outbound) {
                         log.warn(

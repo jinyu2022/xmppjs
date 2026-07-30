@@ -1,6 +1,5 @@
 import type { Plugin } from "../types";
 import type Connection from "@/connection";
-// import { implementation } from "@/shims";
 import { XMPPElement } from "@/ltx";
 import { Presence, Iq} from "@/stanza";
 import { XMPPError } from "@/errors";

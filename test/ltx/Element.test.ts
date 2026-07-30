@@ -7,7 +7,7 @@ describe('XMPPElement', () => {
       const el = XMPPElement.createElement('message');
       expect(el.tagName).toBe('message');
       expect(el.childNodes).toEqual([]);
-      expect(el.getAttribute('xmlns')).toBeUndefined();
+      expect(el.getAttribute('xmlns')).toBeNull();
     });
   });
 
@@ -58,7 +58,7 @@ describe('XMPPElement', () => {
     });
   });
 
-  describe('getChild', () => {
+  describe('getChildren first match', () => {
     it('should get first matching child', () => {
       const el = XMPPElement.createElement('message');
       const body = XMPPElement.createElement('body');
@@ -66,12 +66,12 @@ describe('XMPPElement', () => {
       el.appendChild(body);
       el.appendChild(thread);
       
-      expect(el.getChild('body')).toBe(body);
+      expect(el.getChildren('body')[0]).toBe(body);
     });
 
     it('should return undefined if not found', () => {
       const el = XMPPElement.createElement('message');
-      expect(el.getChild('body')).toBeUndefined();
+      expect(el.getChildren('body')[0]).toBeUndefined();
     });
   });
 
@@ -99,9 +99,25 @@ describe('XMPPElement', () => {
       expect(el.getAttribute('id')).toBe('123');
     });
 
-    it('should return undefined for missing attribute', () => {
+    it('should return null for missing attribute', () => {
       const el = XMPPElement.createElement('message');
-      expect(el.getAttribute('id')).toBeUndefined();
+      expect(el.getAttribute('id')).toBeNull();
+    });
+
+    it('should safely handle names inherited by ordinary objects', () => {
+      const el = XMPPElement.createElement('message');
+
+      expect(el.getAttribute('constructor')).toBeNull();
+      expect(el.getAttribute('toString')).toBeNull();
+      expect(el.getAttribute('__proto__')).toBeNull();
+
+      el.setAttribute('constructor', 'ctor');
+      el.setAttribute('toString', 'stringifier');
+      el.setAttribute('__proto__', 'prototype');
+
+      expect(el.getAttribute('constructor')).toBe('ctor');
+      expect(el.getAttribute('toString')).toBe('stringifier');
+      expect(el.getAttribute('__proto__')).toBe('prototype');
     });
   });
 
@@ -123,7 +139,7 @@ describe('XMPPElement', () => {
       
       const result = el.removeAttribute('id');
       expect(result).toBe(el);
-      expect(el.getAttribute('id')).toBeUndefined();
+      expect(el.getAttribute('id')).toBeNull();
       expect(el.getAttribute('type')).toBe('chat');
     });
   });
@@ -132,16 +148,28 @@ describe('XMPPElement', () => {
     it('should return text content of children', () => {
         const el = XMPPElement.createElement('message');
         el.append('Hello', ' ', 'World');
-        console.log(el);
         expect(el.textContent).toBe('Hello World');
     });
 
-    it('should ignore element children in textContent', () => {
+    it('should recursively collect descendant text content', () => {
         const el = XMPPElement.createElement('message');
         el.append('Hello');
-        el.appendChild(XMPPElement.createElement('br'));
-        el.append('World');
+        const b = XMPPElement.createElement('b');
+        b.append('World');
+        el.appendChild(b);
         expect(el.textContent).toBe('HelloWorld');
+    });
+
+    it.each(['', null])('should clear children when set to %s', (value) => {
+      const el = XMPPElement.createElement('message');
+      const child = XMPPElement.createElement('body');
+      el.appendChild(child);
+
+      el.textContent = value;
+
+      expect(el.childNodes).toHaveLength(0);
+      expect(child.parentNode).toBeNull();
+      expect(el.toXMLString()).toBe('<message/>');
     });
   });
 
@@ -178,27 +206,76 @@ describe('XMPPElement', () => {
         el.appendChild(body);
         
         const xml = el.toXMLString(2);
-        expect(xml).toBe('<message>\n  <body>Hello</body>\n</message>');
+        // level 参数默认为 2，子节点缩进 = 2 * (level + 1) = 6 空格
+        expect(xml).toBe('<message>\n      <body>Hello</body>\n    </message>');
       });
   });
   
-  describe('ownerDocument', () => {
-      it('should return self if no parent', () => {
-          const el = XMPPElement.createElement('message');
-          expect(el.ownerDocument).toBe(el);
-      });
+  describe('appendChild reparent', () => {
+    it('should move child from old parent', () => {
+      const a = XMPPElement.createElement('a');
+      const b = XMPPElement.createElement('b');
+      const child = XMPPElement.createElement('child');
+      a.appendChild(child);
+      b.appendChild(child);
+      expect(a.childNodes).toHaveLength(0);
+      expect(b.childNodes[0]).toBe(child);
+      expect(child.parentNode).toBe(b);
+    });
 
-      it('should return root element', () => {
-          const root = XMPPElement.createElement('root');
-          const child = XMPPElement.createElement('child');
-          const grandChild = XMPPElement.createElement('grandChild');
-          
-          root.appendChild(child);
-          child.appendChild(grandChild);
-          
-          expect(grandChild.ownerDocument).toBe(root);
-          expect(child.ownerDocument).toBe(root);
-      });
+    it('should reject inserting an element into itself', () => {
+      const el = XMPPElement.createElement('message');
+
+      expect(() => el.appendChild(el)).toThrowError(
+        expect.objectContaining({ name: 'HierarchyRequestError' })
+      );
+      expect(el.parentNode).toBeNull();
+      expect(el.childNodes).toHaveLength(0);
+    });
+
+    it('should reject inserting an ancestor into its descendant', () => {
+      const root = XMPPElement.createElement('root');
+      const child = XMPPElement.createElement('child');
+      root.appendChild(child);
+
+      expect(() => child.appendChild(root)).toThrowError(
+        expect.objectContaining({ name: 'HierarchyRequestError' })
+      );
+      expect(root.parentNode).toBeNull();
+      expect(child.parentNode).toBe(root);
+    });
+  });
+
+  describe('removeChild throw', () => {
+    it('should throw if not a child', () => {
+      const el = XMPPElement.createElement('message');
+      const body = XMPPElement.createElement('body');
+      expect(() => el.removeChild(body)).toThrow(
+        'The node to be removed is not a child of this node.'
+      );
+    });
+  });
+
+  describe('setAttributeNS', () => {
+    it('should accept DOM-style 3 args', () => {
+      const el = XMPPElement.createElement('message');
+      el.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:lang', 'zh');
+      expect(el.getAttribute('xml:lang')).toBe('zh');
+    });
+  });
+
+  describe('getElementsByTagNameNS', () => {
+    it('should support namespace wildcard and empty string', () => {
+      const root = XMPPElement.createElementNS('urn:x', 'x:root');
+      const item = XMPPElement.createElementNS('urn:x', 'x:item');
+      root.appendChild(item);
+      const plain = XMPPElement.createElement('item');
+      root.appendChild(plain);
+
+      expect(root.getElementsByTagNameNS('*', 'item')).toHaveLength(2);
+      expect(root.getElementsByTagNameNS('urn:x', '*')).toHaveLength(1);
+      expect(root.getElementsByTagNameNS('', 'item')).toContain(plain);
+    });
   });
 
   describe('append', () => {
@@ -230,6 +307,16 @@ describe('XMPPElement', () => {
     it('should return null if no parent', () => {
       const el = XMPPElement.createElement('message');
       expect(el.parentElement).toBeNull();
+    });
+
+    it('should expose parentNode as a readonly getter', () => {
+      const descriptor = Object.getOwnPropertyDescriptor(
+        XMPPElement.prototype,
+        'parentNode'
+      );
+
+      expect(descriptor?.get).toBeTypeOf('function');
+      expect(descriptor?.set).toBeUndefined();
     });
   });
 

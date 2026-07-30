@@ -2,7 +2,8 @@ import Connection from "./connection";
 import { JID } from "./JID";
 import { plugins } from "./plugins";
 import { Options } from "./types";
-import { Message } from "@/stanza";
+import { Message, MsgType } from "@/stanza";
+import { TimeoutError } from "./errors";
 export class Client extends Connection {
   constructor(jid: string, password: string, options?: Options) {
     super(jid, password, options);
@@ -24,21 +25,27 @@ export class Client extends Connection {
    * @param body - 消息内容
    * @param type - 消息类型，默认为 "normal"
    */
-  sendMsg(to: JID | string, body: string, type = "normal") {
+  sendMsg(to: JID | string, body: string, type: MsgType = "normal") {
     const msg = Message.createMessage(to, body, type);
-    this.send(msg.documentElement!);
+    this.send(msg);
   }
 
   /**
    * 异步发送消息，超时时间为 1000ms，主要用于接收可能的<error>
+   * 超时视为正常情况（消息通常不会收到响应），不抛出异常
    * @param to - 接收方的 JID 或字符串
    * @param body - 消息内容
    * @param type - 消息类型，默认为 "normal"
-   * @throws 超时或者发送失败时抛出异常
+   * @throws 仅在发送失败（非超时）时抛出异常
    */
-  postMsg(to: JID | string, body: string, type = "normal") {
+  async postMsg(to: JID | string, body: string, type: MsgType = "normal") {
     const msg = Message.createMessage(to, body, type);
-    return this.sendAsync(msg.documentElement!, 1000);
+    try {
+      return await this.sendAsync(msg, 100);
+    } catch (e) {
+      if (e instanceof TimeoutError) return;
+      throw e;
+    }
   }
   
   getRoster() {

@@ -2,7 +2,10 @@ import { JID } from "@/JID";
 import { MucSelfPing } from "./MucSelfPing";
 import type { Plugin } from "../types";
 import Connection from "@/connection";
-import { XMPPError } from "@/errors";
+import { XMPPError, TimeoutError } from "@/errors";
+import logger from "@/log";
+
+const log = logger.getLogger("XEP0410");
 /**
  * XEP-0410: MUC Self-Ping (Schrödinger's Chat)
  * @see https://xmpp.org/extensions/xep-0410.html
@@ -10,6 +13,8 @@ import { XMPPError } from "@/errors";
  */
 export class XEP0410 extends MucSelfPing implements Plugin {
     static readonly dependencies = ["XEP0045", "XEP0199"] as const;
+    
+    readonly SELF_PING_TIMEOUT = 10_000;
     connection: Connection;
 
     constructor(connection: Connection) {
@@ -30,6 +35,7 @@ export class XEP0410 extends MucSelfPing implements Plugin {
                         // 1. service-unavailable 或 feature-not-implemented: 客户端已加入，但 pinged 的客户端未实现 XMPP Ping
                         // 2. item-not-found: 客户端已加入，但用户刚刚更改了他们的名字
                         // 3. remote-server-not-found 或 remote-server-timeout: S2S 连接问题，可能仍在房间
+                        if (status.error instanceof TimeoutError) return true;
                         if (status.type === "error" && status.error instanceof XMPPError) {
                             return !["service-unavailable", "feature-not-implemented", "item-not-found", "remote-server-not-found", "remote-server-timeout"].includes(status.error.condition ?? "");
                         }
@@ -50,18 +56,23 @@ export class XEP0410 extends MucSelfPing implements Plugin {
         const muc = this.connection.XEP0045;
         if (!muc) return;
 
-        for (const roomJid of roomJids) {
-            const info = muc.rooms.get(roomJid);
-            if (info) {
-                await muc.join(roomJid, info.nick);
-            }
-        }
+        await Promise.all(
+            roomJids.map(async (roomJid) => {
+                const info = muc.rooms.get(roomJid);
+                if (!info) return;
+                try {
+                    await muc.join(roomJid, info.nick);
+                } catch (e) {
+                    log.error(`重加入 ${roomJid} 失败:`, e);
+                }
+            })
+        );
     }
 
     /**
      * Ping 所有已加入的房间以确认会话状态
      */
-    async pingAllJoinedRooms() {
+    pingAllJoinedRooms() {
         const muc = this.connection.XEP0045;
         if (!muc) return;
 
@@ -81,7 +92,7 @@ export class XEP0410 extends MucSelfPing implements Plugin {
      * @param to occupant JID (e.g. 'room@service/nick')
      */
     async pingOccupant(to: string | JID) {
-        return this.connection.XEP0199!.ping(to.toString())
+        return this.connection.XEP0199!.ping(to.toString(), this.SELF_PING_TIMEOUT)
         .then((duration) => ({ type: "result", duration } as const))
         .catch((error) => ({ type: "error", error } as const));
     }

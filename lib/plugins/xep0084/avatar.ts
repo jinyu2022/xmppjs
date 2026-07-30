@@ -1,7 +1,6 @@
 import { PEP } from "../xep0163/pep";
-import { implementation } from "@/shims";
+import { XMPPElement } from "@/ltx/Element";
 import { JID } from "@/JID";
-import { XMPPElement } from "@/ltx";
 
 export interface AvatarMetadata {
     id: string;
@@ -127,26 +126,24 @@ export class Avatar {
         /** @see https://xmpp.org/extensions/xep-0084.html#proto-info */
         if (metadata.type !== "image/png") throw new Error("只支持png格式的图片");
 
-        const publishDoc = implementation.createDocument(null, "publish", null);
-
-        const publishDate = publishDoc.documentElement!;
+        const publishDate = XMPPElement.createElement("publish");
         publishDate.setAttribute("node", Avatar.NS.data);
-        const item = publishDoc.createElement("item");
+        const item = XMPPElement.createElement("item");
         item.setAttribute("id", metadata.id);
-        const data = publishDoc.createElementNS(Avatar.NS.data, "data");
+        const data = XMPPElement.createElementNS(Avatar.NS.data, "data");
         data.textContent = base64Data;
         item.appendChild(data);
         publishDate.appendChild(item);
 
-        const publishMetadata = publishDoc.createElement("publish");
+        const publishMetadata = XMPPElement.createElement("publish");
         publishMetadata.setAttribute("node", Avatar.NS.metadata);
-        const itemMetadata = publishDoc.createElement("item");
+        const itemMetadata = XMPPElement.createElement("item");
         itemMetadata.setAttribute("id", metadata.id);
-        const metadataEl = publishDoc.createElementNS(
+        const metadataEl = XMPPElement.createElementNS(
             Avatar.NS.metadata,
             "metadata"
         );
-        const infoEl = publishDoc.createElement("info");
+        const infoEl = XMPPElement.createElement("info");
         infoEl.setAttribute("id", metadata.id);
         infoEl.setAttribute("type", metadata.type);
         infoEl.setAttribute("bytes", metadata.bytes.toString());

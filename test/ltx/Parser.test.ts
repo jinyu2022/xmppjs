@@ -31,7 +31,7 @@ describe('Parser (Integration with LtxParser)', () => {
         expect(tree.getAttribute('id')).toBe('123');
         expect(tree.childNodes).toHaveLength(1);
 
-        const query = tree.getChild('query');
+        const query = tree.getChildren('query')[0];
         expect(query).toBeInstanceOf(XMPPElement);
         expect(query?.getAttribute('xmlns')).toBe('jabber:iq:roster');
         expect(query?.textContent).toBe('Hello World');
@@ -86,7 +86,7 @@ describe('Parser (Integration with LtxParser)', () => {
 
       parser.on('tree', (tree: XMPPElement) => {
         expect(tree.tagName).toBe('root');
-        expect(tree.getChild('child')?.textContent).toBe('text');
+        expect(tree.getChildren('child')[0]?.textContent).toBe('text');
         resolve();
       });
 

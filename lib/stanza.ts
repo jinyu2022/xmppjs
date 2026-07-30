@@ -7,7 +7,7 @@ const log = logger.getLogger("stanza");
 /**away：离开 chat：在线 dnd：忙碌 xa：离开（长时间）*/
 type presShow = "away" | "chat" | "dnd" | "xa";
 /**normal：普通消息（默认值） chat：聊天消息 groupchat：群聊消息 error：错误消息 */
-type MsgType = "normal" | "chat" | "groupchat" | "error";
+export type MsgType = "normal" | "chat" | "groupchat" | "error";
 export class StanzaBase {
   static readonly NS = "jabber:client" as const;
 

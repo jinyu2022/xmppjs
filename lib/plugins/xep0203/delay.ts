@@ -1,7 +1,6 @@
-import { implementation } from "../../shims";
+import { XMPPElement } from "../../ltx/Element";
 import { XMPPDateTime } from "../xep0082/dateTime";
 import { XMPPError } from "../../errors";
-import type { XMPPElement } from "../../ltx";
 export class Delay {
     static readonly NS = "urn:xmpp:delay";
 
@@ -34,8 +33,7 @@ export class Delay {
      * @returns 返回一个 XML 元素，包含延迟信息，具有 "stamp"、"from" 和文本内容（原因）属性。
      */
     static createDelayEl(stamp: Date, from: string, reason: string) {
-        const delayElement = implementation.createDocument(Delay.NS, "delay", null)
-            .documentElement!;
+        const delayElement = XMPPElement.createElementNS(Delay.NS, "delay");
         delayElement.setAttribute("stamp", XMPPDateTime.formatDateTime(stamp));
         delayElement.setAttribute("from", from);
         delayElement.textContent = reason;

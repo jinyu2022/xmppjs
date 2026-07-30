@@ -102,7 +102,7 @@ export class Parser extends EventEmitter {
     // text: 文本事件将内容追加到当前元素
     this.parser.on("text", (str: string) => {
       if (this.currentElement) {
-        this.currentElement.childNodes.push(str);
+        this.currentElement.append(str);
       }
     });
 

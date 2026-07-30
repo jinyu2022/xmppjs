@@ -5,8 +5,7 @@ import { XMPPError, TimeoutError } from "./errors";
 import { JID } from "./JID";
 import logger from "./log";
 import { Message, Iq, Presence, StanzaBase } from "./stanza";
-import type WSConnection from "./transport/websocket";
-import type XMPPConnection from "./transport/tcp";
+import type { TransportSocket } from "./transport/typing";
 import type { Protocol, Options } from "./types"; 
 const log = logger.getLogger("connection");
 
@@ -101,7 +100,7 @@ export class Connection extends EventEmitter {
    * 当前的连接实例
    * @warrning 你要知道你自己在做什么
    */
-  socket: XMPPConnection | null = null;
+  socket: TransportSocket | null = null;
   /** 插件列表，键是插件名 */
   private readonly pendingPlugins = new Map<string, PluginConstructor>();
 
@@ -322,21 +321,21 @@ export class Connection extends EventEmitter {
     ) {
       log.debug("存在插件，尝试使用XEP0156插件获取url");
 
-      this.socket = (await this.createSocket()) as WSConnection;
+      // this.socket = (await this.createSocket()) as WSConnection;
       this._setupSocketEvents();
       this.initPlugins();
       await this.XEP0156!.init();
-      this.socket.connect(this.url);
+      // this.socket.connect(this.url);
     } else {
-      this.socket = (await this.createSocket()) as XMPPConnection;
+      this.socket = await this.createSocket();
       this.initPlugins();
       this.socket.connect(this.url);
       this._setupSocketEvents();
     }
   }
 
-  private async createSocket() {
-    if (this.protocol === "ws" && typeof WebSocket !== "undefined") {
+  private async createSocket(): Promise<TransportSocket> {
+    if (this.protocol === "ws") {
       const WSConnection = (await import("./transport/websocket")).default;
       return new WSConnection(this.jid, this.password);
     } else if (this.protocol === "http") {
@@ -361,6 +360,10 @@ export class Connection extends EventEmitter {
       this.emit("connect");
     });
     this.socket.once("binded", () => {
+      // RFC 6120 §4.3.6 / §7.7.1：以服务器返回的 bound JID 为准
+      if (this.socket && "jid" in this.socket && this.socket.jid) {
+        this.jid = this.socket.jid as typeof this.jid;
+      }
       this.emit("session:start");
     });
     this.socket.once("session:end", () => {
@@ -534,6 +537,15 @@ export class Connection extends EventEmitter {
     // 一个从客户端发送到服务器的由该服务器直接处理的节(例如, presence状态信息)不能拥有'to'属性
     if (stanza.tagName === "message" && !stanza.getAttribute("to")) {
       throw new XMPPError(stanza, "message stanza缺少to属性");
+    }
+    // 如果节是groupchat，那么必须使用bare JID作为to属性
+    if (stanza.tagName === "message" &&
+        stanza.getAttribute("type") === "groupchat"){
+      const to = stanza.getAttribute("to");
+      if (to?.includes("/")) {
+        log.warn("groupchat类型的message stanza的to属性应该是bare JID，正在自动转换");
+        stanza.setAttribute("to", to.split("/")[0]);
+      }
     }
     if (stanza.tagName === "iq" && !stanza.getAttribute("type")) {
       throw new XMPPError(stanza, "iq stanza缺少type属性");

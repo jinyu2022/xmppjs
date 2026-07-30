@@ -54,8 +54,8 @@ class DoH {
 /** 按照 SRV 记录的优先级和权重排序 */
 function sortBySrvPriority(records: SrvRecord[]): SrvRecord[] {
     return records.sort((a, b) => {
-        // 首先按优先级排序（较高的优先级值优先）
-        const priorityComparison = b.priority - a.priority;
+        // 首先按优先级排序（较低的优先级值优先）
+        const priorityComparison = a.priority - b.priority;
         if (priorityComparison !== 0) {
             return priorityComparison;
         }

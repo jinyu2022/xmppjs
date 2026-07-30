@@ -1,10 +1,9 @@
 import { escapeXML, escapeXMLText } from "./escape.js";
-// 定义节点类型，文本节点为 string 或 number，元素节点为 XMPPElement
+/** DOM-inspired：文本节点用 string，元素节点用 XMPPElement */
 export type Node = XMPPElement | string;
 
 /**
- * XMPPElementCollection 类：表示一个只读的 XMPPElement 集合，类似于 DOM 的 HTMLCollection。
- * 避免暴露数组方法，防止与传统 DOM API 混淆。
+ * 只读元素集合，类似 HTMLCollection 的简化版（非 live）。
  */
 export class XMPPElementCollection implements Iterable<XMPPElement> {
   private readonly elements: XMPPElement[];
@@ -41,16 +40,19 @@ export class XMPPElementCollection implements Iterable<XMPPElement> {
 }
 
 /**
- * XMPPElement 类：表示一个 XML/类似 LTX 的元素节点。
+ * DOM-inspired XML 元素（XMPP/LTX）。
+ * 命名与常用行为贴近 DOM，但不是完整 WHATWG 实现。
  */
 export class XMPPElement {
   public readonly tagName: string;
-  public parentNode: XMPPElement | null = null;
-  public childNodes: Node[] = [];
-  private attrs: Record<string, string> = {};
+  private _parentNode: XMPPElement | null = null;
+  /** 内部可写子节点列表 */
+  private _childNodes: Node[] = [];
+  /** 无原型属性表，允许安全使用 constructor、toString、__proto__ 等 XML 属性名。 */
+  private readonly attrs: Record<string, string> = Object.create(null) as Record<string, string>;
 
   /**
-   * TIP: 请使用createElement方法创建实例
+   * TIP: 请使用 createElement / createElementNS 创建实例
    * @param tagName 元素的标签名
    * @param namespaceURI 元素的命名空间 URI
    * @param qualifiedName 元素的限定名
@@ -71,6 +73,11 @@ export class XMPPElement {
     if (namespaceURI) {
       this.attrs[this.prefix ? `xmlns:${this.prefix}` : "xmlns"] = namespaceURI;
     }
+  }
+
+  /** 只读子节点列表（DOM 风格） */
+  public get childNodes(): readonly Node[] {
+    return this._childNodes;
   }
 
   /**
@@ -128,6 +135,7 @@ export class XMPPElement {
   ): XMPPElement {
     return new XMPPElement(undefined, namespaceURI, qualifiedName);
   }
+
   /**
    * 获取不带前缀的本地名称 (e.g., "ns:tag" -> "tag")。
    */
@@ -140,8 +148,7 @@ export class XMPPElement {
    * 获取属性值。
    */
   public getAttribute(name: string): string | null {
-    const value = this.attrs[name];
-    return value === undefined ? null : value;
+    return this.attrs[name] ?? null;
   }
 
   /**
@@ -153,14 +160,15 @@ export class XMPPElement {
   }
 
   /**
-   * 设置带命名空间的属性值 (DOM 标准风格：setAttributeNS)。
-   * @param namespaceURI 属性的命名空间 URI
+   * DOM 风格：setAttributeNS(namespaceURI, qualifiedName, value)。
+   * 本实现以 qualifiedName 为属性键存储（XMPP 实用简化）。
+   * @param _namespaceURI 属性的命名空间 URI（签名兼容，当前未使用）
    * @param qualifiedName 属性的限定名 (e.g., "xml:lang")
    * @param value 属性值
    * @returns 当前元素实例
    */
   public setAttributeNS(
-    namespaceURI: string | null,
+    _namespaceURI: string | null,
     qualifiedName: string,
     value: string
   ): this {
@@ -193,7 +201,7 @@ export class XMPPElement {
    */
   public getChildren(name: string): XMPPElement[] {
     const result: XMPPElement[] = [];
-    for (const child of this.childNodes) {
+    for (const child of this._childNodes) {
       if (child instanceof XMPPElement && child.localName === name) {
         result.push(child);
       }
@@ -206,7 +214,7 @@ export class XMPPElement {
    */
   public get children(): XMPPElementCollection {
     const result: XMPPElement[] = [];
-    for (const child of this.childNodes) {
+    for (const child of this._childNodes) {
       if (child instanceof XMPPElement) {
         result.push(child);
       }
@@ -215,39 +223,39 @@ export class XMPPElement {
   }
 
   /**
-   * 获取当前元素内所有文本内容（只拼接文本或数字类型的直接子节点）。
+   * 获取当前元素内所有文本内容。
    */
   public get textContent(): string {
     let text = "";
-    for (const child of this.childNodes) {
-      if (typeof child === "string" || typeof child === "number") {
+    for (const child of this._childNodes) {
+      if (typeof child === "string") {
         text += child;
+      } else if (child instanceof XMPPElement) {
+        text += child.textContent;
       }
     }
     return text;
   }
 
   /**
-   * 设置当前元素的文本内容。
+   * 设置当前元素的文本内容。null 与空字符串都会清空全部子节点。
    */
-  public set textContent(value: string) {
-    // 移除所有子节点，并清除它们的 parentNode
-    for (const child of this.childNodes) {
+  public set textContent(value: string | null) {
+    for (const child of this._childNodes) {
       if (child instanceof XMPPElement) {
-        child.parentNode = null;
+        child._parentNode = null;
       }
     }
-    // 设置新的子节点为单个文本节点
-    this.childNodes = [value];
+    this._childNodes = value ? [value] : [];
   }
+
   /**
    * 递归获取所有匹配的后代元素。
    */
   public getElementsByTagName(tagName: string): XMPPElement[] {
     const result: XMPPElement[] = [];
-    // 使用内部函数递归，避免反复创建数组和展开
     const traverse = (el: XMPPElement) => {
-      for (const child of el.childNodes) {
+      for (const child of el._childNodes) {
         if (child instanceof XMPPElement) {
           // 支持通配符 '*' 或精确匹配
           if (tagName === "*" || child.tagName === tagName) {
@@ -258,20 +266,29 @@ export class XMPPElement {
         }
       }
     };
-    
+
     traverse(this);
     return result;
   }
 
-  public getElementsByTagNameNS(namespaceURI: string, localName: string): XMPPElement[] {
+  /**
+   * DOM 风格：
+   * - namespaceURI === "" 视为 null
+   * - namespaceURI === "*" 匹配任意命名空间
+   * - localName === "*" 匹配任意本地名
+   */
+  public getElementsByTagNameNS(
+    namespaceURI: string | null,
+    localName: string
+  ): XMPPElement[] {
+    const ns = namespaceURI === "" ? null : namespaceURI;
     const result: XMPPElement[] = [];
     const traverse = (el: XMPPElement) => {
-      for (const child of el.childNodes) {
+      for (const child of el._childNodes) {
         if (child instanceof XMPPElement) {
-          if (
-            child.namespaceURI === namespaceURI &&
-            (child.localName === localName || localName === "*")
-          ) {
+          const nsMatch = ns === "*" || child.namespaceURI === ns;
+          const nameMatch = localName === "*" || child.localName === localName;
+          if (nsMatch && nameMatch) {
             result.push(child);
           }
           traverse(child);
@@ -285,43 +302,57 @@ export class XMPPElement {
   /**
    * 创建一个新的子元素（DOM 标准风格：appendChild）
    */
-  public appendChild(XMPPElement: XMPPElement): XMPPElement {
-    this.childNodes.push(XMPPElement);
-    XMPPElement.parentNode = this;
-    return XMPPElement;
+  public appendChild(child: XMPPElement): XMPPElement {
+    let ancestor = this.parentNode;
+    while (ancestor && ancestor !== child) {
+      ancestor = ancestor.parentNode;
+    }
+    // 禁止插入自身或祖先节点，避免形成循环引用
+    if (child === this || ancestor === child) {
+      throw new DOMException(
+        "The new child would create a cycle in the node tree.",
+        "HierarchyRequestError"
+      );
+    }
+
+    if (child.parentNode) {
+      child.parentNode.removeChild(child);
+    }
+    this._childNodes.push(child);
+    child._parentNode = this;
+    return child;
   }
 
   /**
    * 移除指定的子元素（DOM 标准风格：removeChild）
    */
-  public removeChild(XMPPElement: XMPPElement): XMPPElement {
-    const idx = this.childNodes.indexOf(XMPPElement);
-    if (idx >= 0) {
-      this.childNodes.splice(idx, 1);
-      XMPPElement.parentNode = null;
+  public removeChild(child: XMPPElement): XMPPElement {
+    const idx = this._childNodes.indexOf(child);
+    if (idx < 0) {
+      throw new Error("The node to be removed is not a child of this node.");
     }
-    return XMPPElement;
+    this._childNodes.splice(idx, 1);
+    child._parentNode = null;
+    return child;
   }
 
-  /** 返回最上层的根元素（递归向上）。DOM 风格别名：ownerDocument */
-  public get ownerDocument(): XMPPElement {
-    if (this.parentNode) {
-      return this.parentNode.ownerDocument;
-    }
-    return this;
+  /** 返回父节点（没有父节点则返回 null）。 */
+  public get parentNode(): XMPPElement | null {
+    return this._parentNode;
   }
 
-  /** 返回父节点（没有父节点则返回 null）。DOM 风格别名：parentXMPPElement */
+  /** 返回父元素（没有父元素则返回 null）。 */
   public get parentElement(): XMPPElement | null {
-    return this.parentNode;
+    return this._parentNode;
   }
 
   /** 追加任意节点（可传多个），并设置对象节点的 parent */
   public append(...nodes: Node[]): void {
     for (const node of nodes) {
-      this.childNodes.push(node);
       if (node instanceof XMPPElement) {
-        node.parentNode = this;
+        this.appendChild(node);
+      } else {
+        this._childNodes.push(node);
       }
     }
   }
@@ -332,7 +363,7 @@ export class XMPPElement {
    * @param level 内部使用，当前缩进级别
    * @returns 格式化的 XML 字符串
    */
-  public toXMLString(indent?: string | number, level: number = 0): string {
+  public toXMLString(indent?: string | number, level: number = 2): string {
     if (typeof indent === "number") {
       indent = " ".repeat(indent);
     }
@@ -347,15 +378,14 @@ export class XMPPElement {
       }
     }
 
-    const children_length = this.childNodes.length;
+    const children_length = this._childNodes.length;
 
-    // 只有一个文本子节点的情况
-    if (children_length === 1 && typeof this.childNodes[0] === "string") {
-      s += `>${escapeXMLText(String(this.childNodes[0]))}</${this.tagName}>`;
+    if (children_length === 1 && typeof this._childNodes[0] === "string") {
+      s += `>${escapeXMLText(this._childNodes[0])}</${this.tagName}>`;
     } else if (children_length > 0) {
       // 有多个子节点或子元素
       s += ">";
-      for (const child of this.childNodes) {
+      for (const child of this._childNodes) {
         if (child == null) continue;
 
         if (indent) {
@@ -364,8 +394,6 @@ export class XMPPElement {
 
         if (typeof child === "string") {
           s += escapeXMLText(child);
-        } else if (typeof child === "number") {
-          s += escapeXMLText(String(child));
         } else if (child instanceof XMPPElement) {
           s += child.toXMLString(indent, level + 1);
         }
@@ -402,7 +430,7 @@ export class XMPPElement {
       }
     }
 
-    if (this.childNodes.length === 0) {
+    if (this._childNodes.length === 0) {
       writer("/>");
     } else {
       this._addChildren(writer);
@@ -414,12 +442,12 @@ export class XMPPElement {
    */
   protected _addChildren(writer: (chunk: string) => void): void {
     writer(">");
-    for (const child of this.childNodes) {
+    for (const child of this._childNodes) {
       if (child != null) {
         if (child instanceof XMPPElement) {
           child.write(writer);
-        } else if (typeof child === "string" || typeof child === "number") {
-          writer(escapeXMLText(String(child)));
+        } else if (typeof child === "string") {
+          writer(escapeXMLText(child));
         }
       }
     }

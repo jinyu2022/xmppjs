@@ -1,9 +1,11 @@
 import { Form, type DataForm } from "../xep0004/form";
-import { domParser, xmlSerializer } from "@/shims";
+
 import { XMPPError, TimeoutError } from "@/errors";
 import { Register, type WSconnection } from "./register";
 import type { TLSSocket } from "node:tls";
 import { EventEmitter } from "events";
+import { Parser } from "@/ltx/Parser";
+import type { XMPPElement } from "@/ltx/Element";
 /**
  * XEP-0077: In-Band Registration
  * version: 2.4 (2012-01-25)
@@ -12,7 +14,7 @@ import { EventEmitter } from "events";
  */
 export default class XEP0077 extends Register {
   private domain?: string;
-  private socket: TLSSocket | WSconnection | null = null;
+  private socket: TLSSocket | null = null;
   private readonly event = new EventEmitter();
   private protocol?: "xmpps" | "ws";
   private reginstionForm?: DataForm;
@@ -55,15 +57,14 @@ export default class XEP0077 extends Register {
   async connectSocket(domain: string, protocol: "xmpps" | "ws") {
     this.domain = domain;
     this.protocol = protocol;
-    this.socket = await Register.createSocket(domain, protocol);
+    this.socket = (await Register.createSocket(domain, protocol)) ?? null;
     this.setListener();
   }
 
-  sendAsync(data: string | Element, timeout = 10_000): Promise<Element> {
-    let xml: Element | null;
+  sendAsync(data: string | XMPPElement, timeout = 10_000): Promise<XMPPElement> {
+    let xml: XMPPElement;
     if (typeof data === "string") {
-      xml = domParser.parseFromString(data, "text/xml").documentElement;
-      if (!xml) throw new Error("无效的XML字符串");
+      xml = Parser.parse(data);
     } else {
       xml = data;
     }
@@ -74,8 +75,7 @@ export default class XEP0077 extends Register {
     return new Promise((resolve, reject) => {
       const onResponse = (response: string) => {
         response = response.toString();
-        const resElement = domParser.parseFromString(response, "text/xml")
-          .documentElement!;
+        const resElement = Parser.parse(response);
         const responseId = resElement.getAttribute("id");
         if (responseId === id) {
           // 收到匹配的响应，解除监听并解析 Promise
@@ -94,7 +94,7 @@ export default class XEP0077 extends Register {
         reject(new TimeoutError(`请求超时: ${id}`));
       }, timeout);
 
-      this.socket!.write(xmlSerializer.serializeToString(xml));
+      this.socket!.write(xml.toXMLString());
     });
   }
 
@@ -141,7 +141,7 @@ export default class XEP0077 extends Register {
    * 注册账号 - Element重载
    * @param iq IQ请求Element
    */
-  register(iq: Element): Promise<boolean>;
+  register(iq: XMPPElement): Promise<boolean>;
 
   /**
    * 注册账号 - 参数重载
@@ -158,12 +158,12 @@ export default class XEP0077 extends Register {
   ): Promise<boolean>;
 
   async register(
-    iqOrUsername: Element | string,
+    iqOrUsername: XMPPElement | string,
     password?: string,
     captcha?: string,
     challenge?: string
   ): Promise<boolean> {
-    let iq: Element;
+    let iq: XMPPElement;
 
     if (typeof iqOrUsername === "string") {
       if (!password) throw new Error("密码不能为空");
@@ -180,7 +180,7 @@ export default class XEP0077 extends Register {
       iq = iqOrUsername;
     }
 
-    console.log(xmlSerializer.serializeToString(iq));
+    console.log(iq.toXMLString());
     const res = await this.sendAsync(iq);
     if (res.getAttribute("type") === "result") {
       return true;

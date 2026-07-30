@@ -1,13 +1,14 @@
 import { EventEmitter } from "events";
 import { Form } from "../xep0004/form";
 import { Iq } from "@/stanza"
+import { XMPPElement } from "@/ltx/Element";
 export class Register {
   static readonly NS = "jabber:iq:register" as const;
 
   static async createSocket(domain: string, protocol: "xmpps" | "ws") {
     if (protocol === "xmpps") {
       const { resolveXMPPSrv } = await import("@/dns");
-      const { connect } = await import("tls");
+      const { connect } = await import("node:tls");
       const srv = await resolveXMPPSrv(domain, true);
       return connect({
         host: srv[0].host,
@@ -40,17 +41,18 @@ export class Register {
       fields
     })
     const iq = Iq.createIq("set")
-    const query = iq.createElementNS(Register.NS, "query")
+    const query = XMPPElement.createElementNS(Register.NS, "query")
     query.appendChild(form)
-    iq.documentElement!.appendChild(query);
-    iq.documentElement!.setAttribute("id", "reg2");
-    console.log(iq.documentElement?.namespaceURI)
-    return iq.documentElement!;
+    iq.appendChild(query);
+    iq.setAttribute("id", "reg2");
+    console.log(iq.namespaceURI)
+    return iq;
   }
 }
 
 /**
- * 兼容TLSSocket api 的包装
+ * 兼容TLSSocket api 的包装。
+ * WebSocket 注册通道暂时禁用：旧 shims 已移除，保留此类供后续重构参考。
  */
 export class WSconnection extends EventEmitter{
   private readonly url: string;
@@ -67,13 +69,8 @@ export class WSconnection extends EventEmitter{
   }
 
   async connect() {
-    const WS = (await import("@/shims")).getWebSocket();
-    // @ts-expect-error node的ws和浏览器的ws类型不一样
-    this.socket = new WS(this.url);
-    this.socket!.onopen = this.onOpen.bind(this);
-    this.socket!.onmessage = this.onMessage.bind(this);
-    this.socket!.onclose = this.onClose.bind(this);
-    this.socket!.onerror = this.onError.bind(this);
+    void this.url;
+    throw new Error("WebSocket registration transport is temporarily disabled: shims has been removed.");
   }
 
   onOpen(data: unknown) {
@@ -100,3 +97,4 @@ export class WSconnection extends EventEmitter{
     this.socket!.close();
   }
 }
+

@@ -1,3 +1,19 @@
+import type { XMPPElement } from "@/ltx";
+import type { EventEmitter } from "node:events";
+
+/**
+ * TCP / WebSocket 传输层共用接口。
+ * 高层 Connection 通过此接口订阅协商完成与 stanza，不关心底层 framing 差异。
+ */
+export interface TransportSocket extends EventEmitter {
+  status: number;
+  streamFeatures: Set<string>;
+  connect(url?: string): void | Promise<void>;
+  send(data: string | XMPPElement): void;
+  sendAsync(stanza: XMPPElement, timeout?: number): Promise<XMPPElement>;
+  disconnect(): void;
+}
+
 export interface Transport {
     /** 发送数据 */
     send(data: string): void;

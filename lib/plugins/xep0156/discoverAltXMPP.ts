@@ -1,4 +1,4 @@
-import { domParser } from "../../shims";
+import { Parser } from "../../ltx/Parser";
 interface ConnectionMethods {
   websocket?: string;
   httppoll?: string;
@@ -27,7 +27,7 @@ export class XMPPDiscoverer {
       }
 
       const text = await response.text();
-      const doc = domParser.parseFromString(text, "text/xml");
+      const doc = Parser.parse(text);
       const elements = doc.getElementsByTagName("Link");
       const result: ConnectionMethods = {};
 

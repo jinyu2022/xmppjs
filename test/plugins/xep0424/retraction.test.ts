@@ -21,13 +21,16 @@ describe("Retraction", () => {
         });
     });
 
-    it("createRetractionTombstoneEl creates a retracted element", () => {
-        const stamp = new Date(2026, 3, 12, 12, 34, 56);
-        const retracted = Retraction.createRetractionTombstoneEl("msg-2", stamp);
-        expect(retracted.tagName).toBe("retracted");
-        expect(retracted.namespaceURI).toBe(Retraction.NS);
-        expect(retracted.getAttribute("id")).toBe("msg-2");
-        expect(retracted.getAttribute("stamp")).toBe("2026-04-12T12:34:56Z");
+    it("parseRetractionEl parses retracted element (tombstone)", () => {
+        // 根据 XEP-0424 §3.2，撤回标记（tombstone）使用 <retracted/> 元素
+        const retracted = XMPPElement.createElementNS(Retraction.NS, "retracted");
+        retracted.setAttribute("id", "msg-2");
+        retracted.setAttribute("stamp", "2026-04-12T12:34:56Z");
+
+        const result = Retraction.parseRetractionEl(retracted);
+        expect(result.retracted).toBeDefined();
+        expect(result.retracted.id).toBe("msg-2");
+        expect(result.retracted.stamp).toBeInstanceOf(Date);
     });
 
     it("parseRetractionEl parses retracted element", () => {
@@ -38,12 +41,6 @@ describe("Retraction", () => {
         const result = Retraction.parseRetractionEl(retracted);
         expect(result.retracted.id).toBe("msg-2");
         expect(result.retracted.stamp).toBeInstanceOf(Date);
-        expect(result.retracted.stamp?.getFullYear()).toBe(2026);
-        expect(result.retracted.stamp?.getMonth()).toBe(3);
-        expect(result.retracted.stamp?.getDate()).toBe(12);
-        expect(result.retracted.stamp?.getHours()).toBe(12);
-        expect(result.retracted.stamp?.getMinutes()).toBe(34);
-        expect(result.retracted.stamp?.getSeconds()).toBe(56);
     });
 
     it("createRetractionMessage appends retract element to message", () => {

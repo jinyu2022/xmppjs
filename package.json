@@ -33,7 +33,7 @@
   "devDependencies": {
     "@eslint/js": "^9.16.0",
     "@types/events": "^3.0.3",
-    "@types/node": "^25.0.7",
+    "@types/node": "^25.9.1",
     "eslint": "^9.16.0",
     "globals": "^15.13.0",
     "tsc-alias": "^1.8.10",

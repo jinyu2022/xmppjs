@@ -1,12 +1,20 @@
-export type MUCUserPres<T = 'destroy' | 'invite' | 'decline'> = {
+interface MUCUserPresBase {
     item?: MUCItem;
     statuses?: string[];
-} & (
-    T extends 'destroy' ? { destroy: MUCDestroy } :
-    T extends 'invite' ? { invite: MUCInvite, password?: string } :
-    T extends 'decline' ? { decline: MUCDecline } :
-    never
-)
+}
+
+interface MUCUserPresMap {
+    presence: MUCUserPresBase;
+    destroy: MUCUserPresBase & { destroy: MUCDestroy };
+    invite: MUCUserPresBase & { invites: MUCInvite[]; password?: string };
+    decline: MUCUserPresBase & { decline: MUCDecline };
+}
+
+export type MUCUserPresKind = keyof MUCUserPresMap;
+
+export type MUCUserPres<
+    T extends MUCUserPresKind = MUCUserPresKind
+> = MUCUserPresMap[T];
 
 export interface MUCDestroy {
     jid?: string;
@@ -30,11 +38,14 @@ export interface MUCDecline {
     reason?: string;
 }
 
+export type MUCAffiliation = "none" | "outcast" | "member" | "admin" | "owner";
+export type MUCRole = "none" | "visitor" | "participant" | "moderator";
+
 export interface MUCItem {
     jid?: string;
     nick?: string;
-    affiliation: "none" | "outcast" | "member" | "admin" | "owner";
-    role: "none" | "visitor" | "participant" | "moderator";
+    affiliation: MUCAffiliation;
+    role: MUCRole;
     actor?: MUCActor;
     reason?: string;
 }
@@ -48,6 +59,6 @@ export interface MUCUser {
     /** 真实jid */
     jid?: string;
     nick: string;
-    affiliation: "none" | "outcast" | "member" | "admin" | "owner";
-    role: "none" | "visitor" | "participant" | "moderator";
+    affiliation: MUCAffiliation;
+    role: MUCRole;
 }

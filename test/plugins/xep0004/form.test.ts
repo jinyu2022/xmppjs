@@ -148,7 +148,7 @@ describe('Form', () => {
             const field0 = fields[0];
             expect(field0.getAttribute('type')).toBe('jid-single');
             expect(field0.getAttribute('var')).toBe('jid1');
-            expect(field0.getChild('value')?.textContent).toBe('user@example.com');
+            expect(field0.getChildren('value')[0]?.textContent).toBe('user@example.com');
 
             // 验证 text-multi 字段 (包含 required 和多个值)
             const field1 = fields[1];
@@ -164,17 +164,17 @@ describe('Form', () => {
             const field2 = fields[2];
             expect(field2.getAttribute('type')).toBe('list-single');
             expect(field2.getAttribute('var')).toBe('ls1');
-            expect(field2.getChild('value')?.textContent).toBe('B');
+            expect(field2.getChildren('value')[0]?.textContent).toBe('B');
             const options2 = field2.getChildren('option');
             expect(options2.length).toBe(2);
             expect(options2[0].getAttribute('label')).toBe('Option A');
-            expect(options2[0].getChild('value')?.textContent).toBe('A');
+            expect(options2[0].getChildren('value')[0]?.textContent).toBe('A');
 
             // 验证 fixed 字段 (包含 desc)
             const field3 = fields[3];
             expect(field3.getAttribute('type')).toBe('fixed');
             expect(field3.getAttribute('var')).toBeNull();
-            expect(field3.getChild('desc')?.textContent).toBe('A fixed message.');
+            expect(field3.getChildren('desc')[0]?.textContent).toBe('A fixed message.');
             expect(field3.getChildren('value').length).toBe(0);
         });
     });

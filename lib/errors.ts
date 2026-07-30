@@ -1,5 +1,4 @@
 import { XMPPElement } from "./ltx/Element";
-// import { xmlSerializer } from "./shims";
 export const ErrorConditions = [
   "bad-request",
   "conflict",
@@ -27,8 +26,11 @@ export const ErrorConditions = [
 
 export type ErrorTypes = "modify" | "cancel" | "auth" | "wait";
 
+/**
+ * 专门用于表达 XMPP 错误的类，继承自 Error
+ */
 export class XMPPError extends Error {
-  readonly NS = "urn:ietf:params:xml:ns:xmpp-stanzas";
+  static readonly NS = "urn:ietf:params:xml:ns:xmpp-stanzas";
   readonly condition: (typeof ErrorConditions)[number] | null = null;
   readonly type: ErrorTypes | null = null;
   text: string | null = null;
@@ -51,7 +53,7 @@ export class XMPPError extends Error {
     const error = stanza.getElementsByTagName("error")[0];
     if (!error) return;
 
-    const condition = error.getElementsByTagNameNS(this.NS, "*")[0]
+    const condition = error.getElementsByTagNameNS(XMPPError.NS, "*")[0]
       ?.tagName as (typeof ErrorConditions)[number];
     // if (!condition) {
     //   throw new Error("没有condition节点");
@@ -70,6 +72,9 @@ export class XMPPError extends Error {
   }
 }
 
+/**
+ * 专门用于表达超时错误的类，继承自 Error
+ */
 export class TimeoutError extends Error {
   constructor(message: string) {
     super(message);
